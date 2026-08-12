@@ -10,6 +10,7 @@ create table if not exists public.events (
   name text not null default '陀螺 Fun Day',
   school_name text not null default '香港佛教劉金龍中學',
   active_round integer not null default 0 check (active_round between 0 and 8),
+  round_count integer not null default 9,
   created_by uuid not null references auth.users(id) on delete cascade,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -75,12 +76,26 @@ create table if not exists public.battle_matches (
 -- Keep the script safe to re-run after upgrading an earlier version.
 alter table public.endurance_entries
   add column if not exists archived boolean not null default false;
+alter table public.events
+  add column if not exists round_count integer not null default 9;
 alter table public.battle_matches
   add column if not exists timer_elapsed_ms bigint not null default 0;
 alter table public.battle_matches
   add column if not exists timer_started_at timestamptz;
 alter table public.battle_matches
   add column if not exists timer_running boolean not null default false;
+
+alter table public.events drop constraint if exists events_active_round_check;
+alter table public.events drop constraint if exists events_active_round_dynamic_check;
+alter table public.events add constraint events_active_round_dynamic_check check (active_round >= 0);
+alter table public.events drop constraint if exists events_round_count_check;
+alter table public.events add constraint events_round_count_check check (round_count >= 1);
+alter table public.battle_teams drop constraint if exists battle_teams_team_number_check;
+alter table public.battle_teams add constraint battle_teams_team_number_check check (team_number >= 1);
+alter table public.battle_matches drop constraint if exists battle_matches_round_number_check;
+alter table public.battle_matches add constraint battle_matches_round_number_check check (round_number >= 0);
+alter table public.battle_matches drop constraint if exists battle_matches_match_number_check;
+alter table public.battle_matches add constraint battle_matches_match_number_check check (match_number >= 0);
 
 create or replace function public.touch_updated_at()
 returns trigger
@@ -160,7 +175,131 @@ create policy "members manage battle matches" on public.battle_matches for all
 to authenticated using (public.is_event_member(event_id))
 with check (public.is_event_member(event_id));
 
--- Creates one event and seeds both endurance rosters plus the 9-round battle schedule.
+create or replace function public.regenerate_battle_schedule(
+  target_event_id uuid,
+  requested_rounds integer
+)
+returns integer
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  team_ids uuid[];
+  rotation integer[];
+  team_count integer;
+  slot_count integer;
+  maximum_rounds integer;
+  actual_rounds integer;
+  round_idx integer;
+  pair_idx integer;
+  match_idx integer;
+  a integer;
+  b integer;
+  a_team_id uuid;
+  b_team_id uuid;
+begin
+  if not public.is_event_member(target_event_id) then raise exception 'No access to this event'; end if;
+  if exists (
+    select 1 from public.battle_matches
+    where event_id = target_event_id
+      and (complete or a_score > 0 or b_score > 0 or timer_elapsed_ms > 0 or timer_running)
+  ) then
+    raise exception '已有格鬥賽紀錄，請先重設格鬥賽才可重排賽程';
+  end if;
+
+  select array_agg(id order by team_number) into team_ids
+  from public.battle_teams where event_id = target_event_id;
+  team_count := coalesce(array_length(team_ids, 1), 0);
+  if team_count < 2 then raise exception '格鬥賽最少需要 2 組'; end if;
+
+  maximum_rounds := case when team_count % 2 = 0 then team_count - 1 else team_count end;
+  actual_rounds := greatest(1, least(coalesce(requested_rounds, maximum_rounds), maximum_rounds));
+  rotation := array(select generate_series(1, team_count));
+  if team_count % 2 = 1 then rotation := array_append(rotation, 0); end if;
+  slot_count := array_length(rotation, 1);
+
+  delete from public.battle_matches where event_id = target_event_id;
+  for round_idx in 0..actual_rounds - 1 loop
+    match_idx := 0;
+    for pair_idx in 1..slot_count / 2 loop
+      a := rotation[pair_idx];
+      b := rotation[slot_count + 1 - pair_idx];
+      if a > 0 and b > 0 then
+        a_team_id := team_ids[case when round_idx % 2 = 0 then a else b end];
+        b_team_id := team_ids[case when round_idx % 2 = 0 then b else a end];
+        insert into public.battle_matches(
+          event_id, round_number, match_number, team_a_id, team_b_id
+        ) values (target_event_id, round_idx, match_idx, a_team_id, b_team_id);
+        match_idx := match_idx + 1;
+      end if;
+    end loop;
+    rotation := array[rotation[1], rotation[slot_count]] || rotation[2:slot_count - 1];
+  end loop;
+
+  update public.events
+  set round_count = actual_rounds, active_round = least(active_round, actual_rounds - 1)
+  where id = target_event_id;
+  return actual_rounds;
+end;
+$$;
+
+create or replace function public.add_battle_team(target_event_id uuid, team_name text default null)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  new_team_id uuid;
+  next_number integer;
+  current_rounds integer;
+begin
+  if not public.is_event_member(target_event_id) then raise exception 'No access to this event'; end if;
+  select coalesce(max(team_number), 0) + 1 into next_number
+  from public.battle_teams where event_id = target_event_id;
+  select round_count into current_rounds from public.events where id = target_event_id;
+  insert into public.battle_teams(event_id, team_number, name)
+  values (
+    target_event_id,
+    next_number,
+    coalesce(nullif(trim(team_name), ''), '第 ' || next_number || ' 組')
+  ) returning id into new_team_id;
+  perform public.regenerate_battle_schedule(target_event_id, current_rounds);
+  return new_team_id;
+end;
+$$;
+
+create or replace function public.delete_battle_team(target_team_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  target_event_id uuid;
+  current_rounds integer;
+  existing_count integer;
+begin
+  select event_id into target_event_id from public.battle_teams where id = target_team_id;
+  if target_event_id is null or not public.is_event_member(target_event_id) then raise exception 'No access to this team'; end if;
+  if exists (
+    select 1 from public.battle_matches
+    where event_id = target_event_id
+      and (complete or a_score > 0 or b_score > 0 or timer_elapsed_ms > 0 or timer_running)
+  ) then
+    raise exception '已有格鬥賽紀錄，請先重設格鬥賽才可刪除組別';
+  end if;
+  select count(*), max(e.round_count) into existing_count, current_rounds
+  from public.battle_teams t join public.events e on e.id = t.event_id
+  where t.event_id = target_event_id;
+  if existing_count <= 2 then raise exception '格鬥賽最少需要 2 組'; end if;
+  delete from public.battle_teams where id = target_team_id;
+  perform public.regenerate_battle_schedule(target_event_id, current_rounds);
+end;
+$$;
+
+-- Creates one event and seeds both endurance rosters plus the initial battle schedule.
 create or replace function public.create_event(
   event_code text,
   helper_password text,
@@ -174,13 +313,6 @@ set search_path = ''
 as $$
 declare
   new_event_id uuid;
-  team_ids uuid[] := array[]::uuid[];
-  rotation integer[] := array[1,2,3,4,5,6,7,8,9,10,11,12,13,0];
-  a integer;
-  b integer;
-  round_idx integer;
-  pair_idx integer;
-  match_idx integer;
   normalized_code text := upper(trim(event_code));
 begin
   if auth.uid() is null then raise exception 'Authentication required'; end if;
@@ -205,28 +337,10 @@ begin
       (new_event_id, 'manual', '第 ' || i || ' 組', i - 1);
 
     insert into public.battle_teams(event_id, team_number, name)
-    values (new_event_id, i, '第 ' || i || ' 組')
-    returning id into team_ids[i];
+    values (new_event_id, i, '第 ' || i || ' 組');
   end loop;
 
-  for round_idx in 0..8 loop
-    match_idx := 0;
-    for pair_idx in 1..7 loop
-      a := rotation[pair_idx];
-      b := rotation[15 - pair_idx];
-      if a > 0 and b > 0 then
-        insert into public.battle_matches(
-          event_id, round_number, match_number, team_a_id, team_b_id
-        ) values (
-          new_event_id, round_idx, match_idx,
-          team_ids[case when round_idx % 2 = 0 then a else b end],
-          team_ids[case when round_idx % 2 = 0 then b else a end]
-        );
-        match_idx := match_idx + 1;
-      end if;
-    end loop;
-    rotation := array[rotation[1], rotation[14]] || rotation[2:13];
-  end loop;
+  perform public.regenerate_battle_schedule(new_event_id, 9);
 
   return new_event_id;
 end;
@@ -349,6 +463,9 @@ $$;
 
 revoke all on function public.create_event(text, text, text, text) from public;
 revoke all on function public.join_event(text, text) from public;
+revoke all on function public.regenerate_battle_schedule(uuid, integer) from public;
+revoke all on function public.add_battle_team(uuid, text) from public;
+revoke all on function public.delete_battle_team(uuid) from public;
 revoke all on function public.start_endurance(uuid) from public;
 revoke all on function public.finish_endurance(uuid) from public;
 revoke all on function public.reset_endurance(uuid) from public;
@@ -356,6 +473,9 @@ revoke all on function public.start_battle_timer(uuid) from public;
 revoke all on function public.pause_battle_timer(uuid) from public;
 grant execute on function public.create_event(text, text, text, text) to authenticated;
 grant execute on function public.join_event(text, text) to authenticated;
+grant execute on function public.regenerate_battle_schedule(uuid, integer) to authenticated;
+grant execute on function public.add_battle_team(uuid, text) to authenticated;
+grant execute on function public.delete_battle_team(uuid) to authenticated;
 grant execute on function public.start_endurance(uuid) to authenticated;
 grant execute on function public.finish_endurance(uuid) to authenticated;
 grant execute on function public.reset_endurance(uuid) to authenticated;
@@ -363,7 +483,7 @@ grant execute on function public.start_battle_timer(uuid) to authenticated;
 grant execute on function public.pause_battle_timer(uuid) to authenticated;
 
 grant select on public.events to authenticated;
-grant update (name, school_name, active_round) on public.events to authenticated;
+grant update (name, school_name, active_round, round_count) on public.events to authenticated;
 grant select on public.event_members to authenticated;
 grant select, insert, update, delete on public.endurance_entries to authenticated;
 grant select, insert, update, delete on public.battle_teams to authenticated;

@@ -9,13 +9,13 @@
 3. 開啟 **SQL Editor**，貼上並執行 [`supabase/schema.sql`](supabase/schema.sql) 的全部內容。
 4. 到 **Project Settings → API** 複製：
    - Project URL
-   - `anon` / publishable key
+   - `anon` / publishable key 
 5. 在 [`supabase-config.js`](supabase-config.js) 填入這兩個公開值：
 
 ```js
 window.SUPABASE_CONFIG = {
-  url: "https://你的項目.supabase.co",
-  anonKey: "你的公開 anon key"
+  url: "https://wpqbmdivywjmkobzwmsi.supabase.co/rest/v1/",
+  anonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndwcWJtZGl2eXdqbWtvYnp3bXNpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY0OTQyOTksImV4cCI6MjEwMjA3MDI5OX0.D_Xnjvo-Qvvh5-c43jhwlTFgfQVwGsjhe103h4wVkaI"
 };
 ```
 

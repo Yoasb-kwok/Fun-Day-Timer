@@ -315,6 +315,15 @@
       outline: none;
     }
     .field input:focus { border-color: #4b9b83; box-shadow: 0 0 0 3px rgba(75,155,131,.12); }
+    .field-control { display: flex; gap: 6px; }
+    .field-control input { min-width: 0; }
+    .round-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .round-count {
+      min-width: 60px;
+      text-align: center;
+      color: var(--green);
+      font-weight: 900;
+    }
     .callout {
       background: #fff5d8;
       border: 1px solid #eed58a;
@@ -507,7 +516,12 @@
           <h2>單循環格鬥 · 三盤兩勝</h2>
           <p class="hint">每場限時 2 分鐘；勝方 3 分，負方 0 分。</p>
         </div>
-        <button class="btn small no-print" id="resetBattleBtn">重設格鬥賽</button>
+        <div class="round-controls no-print">
+          <button class="btn small" id="removeRoundBtn">− 輪次</button>
+          <span class="round-count" id="roundCountLabel">9 輪</span>
+          <button class="btn small primary" id="addRoundBtn">＋ 輪次</button>
+          <button class="btn small" id="resetBattleBtn">重設格鬥賽</button>
+        </div>
       </div>
       <div class="battle-grid">
         <div class="panel">
@@ -542,7 +556,13 @@
       </div>
       <div class="settings-grid">
         <div class="panel">
-          <h2 style="font-size:20px;margin-bottom:14px">13 組名稱</h2>
+          <div class="section-head">
+            <div>
+              <h2 style="font-size:20px">格鬥組別</h2>
+              <p class="hint">奇數組有輪空；偶數組沒有輪空</p>
+            </div>
+            <button class="btn small primary" id="addBattleTeamBtn">＋ 新增組別</button>
+          </div>
           <div class="team-inputs" id="teamInputs"></div>
         </div>
         <div class="stack">
@@ -587,7 +607,6 @@
       "use strict";
 
       const TEAM_COUNT = 13;
-      const ROUND_COUNT = 9;
       const MATCH_LIMIT = 120000;
       const CONFIG = window.SUPABASE_CONFIG || {};
 
@@ -603,7 +622,7 @@
           electric: Array.from({ length: TEAM_COUNT }, () => ({ elapsed: 0, running: false, startedAt: null, done: false })),
           manual: Array.from({ length: TEAM_COUNT }, () => ({ elapsed: 0, running: false, startedAt: null, done: false }))
         },
-        battle: { matches: {}, activeRound: 0 }
+        battle: { matches: {}, activeRound: 0, roundCount: 9 }
       });
 
       let state = defaultState();
@@ -611,6 +630,7 @@
       let db = null;
       let eventId = null;
       let teamRows = [];
+      let schedule = [];
       let realtimeChannel = null;
       let reloadTimer = null;
       let toastTimer;
@@ -682,6 +702,7 @@
         state.schoolName = event.school_name;
         state.teams = teamRows.map(row => row.name);
         state.battle.activeRound = event.active_round;
+        state.battle.roundCount = event.round_count || 9;
 
         ["electric", "manual"].forEach(category => {
           const rows = enduranceRows.filter(row => row.category === category);
@@ -689,8 +710,15 @@
           state.endurance[category] = rows.map(normalizeEndurance);
         });
 
+        const matchRows = matchesResult.data || [];
+        const teamIndex = new Map(teamRows.map((row, i) => [row.id, i]));
+        schedule = Array.from({ length: state.battle.roundCount }, () => ({ matches: [], bye: null }));
         state.battle.matches = {};
-        (matchesResult.data || []).forEach(row => {
+        matchRows.forEach(row => {
+          if (!schedule[row.round_number]) return;
+          const a = teamIndex.get(row.team_a_id);
+          const b = teamIndex.get(row.team_b_id);
+          schedule[row.round_number].matches.push({ a, b });
           state.battle.matches[`r${row.round_number}-m${row.match_number}`] = {
             id: row.id,
             aScore: row.a_score,
@@ -702,6 +730,12 @@
             updatedAt: row.updated_at
           };
         });
+        schedule.forEach(round => {
+          if (teamRows.length % 2 === 0) return;
+          const playing = new Set(round.matches.flatMap(match => [match.a, match.b]));
+          round.bye = state.teams.findIndex((_, i) => !playing.has(i));
+        });
+        state.battle.activeRound = Math.min(state.battle.activeRound, Math.max(0, schedule.length - 1));
 
         renderHeader();
         renderTimers();
@@ -813,7 +847,7 @@
 
       function renderHeader() {
         $("h1").textContent = state.eventName;
-        $(".subtitle").textContent = `${state.schoolName} · 13 組即時計分`;
+        $(".subtitle").textContent = `${state.schoolName} · ${state.teams.length} 組即時計分`;
         document.title = `${state.eventName} 計分板`;
       }
 
@@ -913,31 +947,14 @@
         toast(`已刪除「${name}」`);
       }
 
-      function generateSchedule() {
-        const participants = Array.from({ length: TEAM_COUNT }, (_, i) => i);
-        participants.push(null);
-        const rounds = [];
-        let rotation = [...participants];
-        for (let round = 0; round < ROUND_COUNT; round++) {
-          const matches = [];
-          let bye = null;
-          for (let i = 0; i < rotation.length / 2; i++) {
-            const a = rotation[i];
-            const b = rotation[rotation.length - 1 - i];
-            if (a === null || b === null) bye = a === null ? b : a;
-            else matches.push(round % 2 ? { a: b, b: a } : { a, b });
-          }
-          rounds.push({ matches, bye });
-          rotation = [rotation[0], rotation[rotation.length - 1], ...rotation.slice(1, -1)];
-        }
-        return rounds;
-      }
-
-      const schedule = generateSchedule();
       const matchId = (round, match) => `r${round}-m${match}`;
       const matchData = (id) => state.battle.matches[id] || { aScore: 0, bScore: 0, complete: false };
 
       function renderRoundPicker() {
+        $("#roundCountLabel").textContent = `${schedule.length} 輪`;
+        const maximum = state.teams.length % 2 === 0 ? state.teams.length - 1 : state.teams.length;
+        $("#removeRoundBtn").disabled = schedule.length <= 1;
+        $("#addRoundBtn").disabled = schedule.length >= maximum;
         $("#roundPicker").innerHTML = schedule.map((round, i) => {
           const complete = round.matches.every((_, m) => matchData(matchId(i, m)).complete);
           return `<button class="round-btn ${i === state.battle.activeRound ? "active" : ""} ${complete ? "complete" : ""}" data-round="${i}">第 ${i + 1} 輪</button>`;
@@ -953,6 +970,10 @@
       function renderMatches() {
         const r = state.battle.activeRound;
         const round = schedule[r];
+        if (!round) {
+          $("#matchList").innerHTML = `<div class="empty">尚未建立賽程</div>`;
+          return;
+        }
         $("#matchList").innerHTML = round.matches.map((match, m) => {
           const id = matchId(r, m);
           const data = matchData(id);
@@ -981,7 +1002,9 @@
                 <button class="btn small" data-match-action="reset" data-id="${id}">重設本場</button>
               </div>
             </article>`;
-        }).join("") + `<div class="bye">本輪輪空：${escapeHtml(state.teams[round.bye])}</div>`;
+        }).join("") + (round.bye === null
+          ? `<div class="bye">本輪所有組別均有比賽，沒有輪空</div>`
+          : `<div class="bye">本輪輪空：${escapeHtml(state.teams[round.bye])}</div>`);
       }
 
       async function updateScore(id, side) {
@@ -1089,8 +1112,44 @@
         $("#teamInputs").innerHTML = state.teams.map((name, i) => `
           <div class="field">
             <label for="team-${i}">第 ${i + 1} 組</label>
-            <input id="team-${i}" data-team-input="${i}" value="${escapeHtml(name)}" maxlength="30">
+            <div class="field-control">
+              <input id="team-${i}" data-team-input="${i}" value="${escapeHtml(name)}" maxlength="30">
+              <button class="btn small danger" data-delete-battle-team="${i}" ${state.teams.length <= 2 ? "disabled" : ""}>刪除</button>
+            </div>
           </div>`).join("");
+      }
+
+      async function changeRoundCount(delta) {
+        const requested = state.battle.roundCount + delta;
+        const { error } = await db.rpc("regenerate_battle_schedule", {
+          target_event_id: eventId,
+          requested_rounds: requested
+        });
+        if (error) return toast(friendlyError(error));
+        await loadEventData(true);
+        toast(`賽程已調整為 ${state.battle.roundCount} 輪`);
+      }
+
+      async function addBattleTeam() {
+        const { error } = await db.rpc("add_battle_team", {
+          target_event_id: eventId,
+          team_name: `第 ${state.teams.length + 1} 組`
+        });
+        if (error) return toast(friendlyError(error));
+        await loadEventData(true);
+        switchView("settings");
+        const input = document.querySelector(`[data-team-input="${state.teams.length - 1}"]`);
+        input?.focus();
+        input?.select();
+      }
+
+      async function deleteBattleTeam(index) {
+        const row = teamRows[index];
+        if (!row || !confirm(`確定刪除格鬥組別「${state.teams[index]}」？賽程會自動重排。`)) return;
+        const { error } = await db.rpc("delete_battle_team", { target_team_id: row.id });
+        if (error) return toast(friendlyError(error));
+        await loadEventData(true);
+        toast("組別已刪除，賽程已重排");
       }
 
       function switchView(view) {
@@ -1137,6 +1196,9 @@
 
         const deleteEnduranceButton = event.target.closest("[data-delete-endurance]");
         if (deleteEnduranceButton) deleteEnduranceTeam(Number(deleteEnduranceButton.dataset.deleteEndurance));
+
+        const deleteBattleButton = event.target.closest("[data-delete-battle-team]");
+        if (deleteBattleButton) deleteBattleTeam(Number(deleteBattleButton.dataset.deleteBattleTeam));
 
         const roundButton = event.target.closest("[data-round]");
         if (roundButton) {
@@ -1205,6 +1267,9 @@
       });
 
       $("#addEnduranceTeamBtn").addEventListener("click", addEnduranceTeam);
+      $("#addBattleTeamBtn").addEventListener("click", addBattleTeam);
+      $("#removeRoundBtn").addEventListener("click", () => changeRoundCount(-1));
+      $("#addRoundBtn").addEventListener("click", () => changeRoundCount(1));
 
       $("#resetBattleBtn").addEventListener("click", async () => {
         if (!confirm("確定清除全部格鬥賽賽果？")) return;
