@@ -501,7 +501,6 @@
               <p class="hint" id="rankCategoryLabel">電動組</p>
             </div>
             <div class="actions no-print">
-              <button class="btn small primary" id="addEnduranceTeamBtn">＋ 新增組別</button>
               <button class="btn small" id="resetCategoryBtn">重設時間</button>
             </div>
           </div>
@@ -558,8 +557,8 @@
         <div class="panel">
           <div class="section-head">
             <div>
-              <h2 style="font-size:20px">格鬥組別</h2>
-              <p class="hint">奇數組有輪空；偶數組沒有輪空</p>
+              <h2 style="font-size:20px">所有比賽組別</h2>
+              <p class="hint">此處的組別及隊名會同時套用到耐力賽和格鬥賽</p>
             </div>
             <button class="btn small primary" id="addBattleTeamBtn">＋ 新增組別</button>
           </div>
@@ -675,6 +674,7 @@
       function normalizeEndurance(row) {
         return {
           id: row.id,
+          teamId: row.battle_team_id,
           position: row.position,
           elapsed: Number(row.elapsed_ms || 0),
           startedAt: row.started_at,
@@ -706,8 +706,12 @@
 
         ["electric", "manual"].forEach(category => {
           const rows = enduranceRows.filter(row => row.category === category);
-          state.enduranceNames[category] = rows.map(row => row.name);
-          state.endurance[category] = rows.map(normalizeEndurance);
+          const byTeam = new Map(rows.filter(row => row.battle_team_id).map(row => [row.battle_team_id, row]));
+          const orderedRows = teamRows.map((team, i) =>
+            byTeam.get(team.id) || rows.find(row => row.position === team.team_number - 1) || rows[i]
+          ).filter(Boolean);
+          state.enduranceNames[category] = orderedRows.map((_, i) => state.teams[i]);
+          state.endurance[category] = orderedRows.map(normalizeEndurance);
         });
 
         const matchRows = matchesResult.data || [];
@@ -859,11 +863,8 @@
           return `
             <article class="timer-card ${item.running ? "running" : ""}" data-timer-card="${i}">
               <div class="timer-top">
-                <input class="team-name-input" data-endurance-name="${i}" value="${escapeHtml(state.enduranceNames[activeCategory][i] || `第 ${i + 1} 組`)}" aria-label="組別名稱" title="點擊修改名稱">
-                <div class="card-badges">
-                  <span class="status ${status[0]}">${status[1]}</span>
-                  <button class="delete-team no-print" data-delete-endurance="${i}" title="刪除組別" aria-label="刪除組別">×</button>
-                </div>
+                <span class="team-name">${escapeHtml(state.teams[i] || `第 ${i + 1} 組`)}</span>
+                <span class="status ${status[0]}">${status[1]}</span>
               </div>
               <div class="timer-display" data-time="${i}">${formatTime(currentElapsed(item))}</div>
               <div class="timer-controls">
@@ -886,7 +887,7 @@
           ? ranked.map((row, rank) => `
               <div class="rank-row">
                 <span class="rank-num">${rank + 1}</span>
-                <span class="team-name">${escapeHtml(state.enduranceNames[activeCategory][row.i])}</span>
+                <span class="team-name">${escapeHtml(state.teams[row.i])}</span>
                 <span class="rank-time">${formatTime(row.time)}</span>
               </div>`).join("")
           : `<div class="empty">尚未有計時紀錄</div>`;
@@ -916,35 +917,6 @@
           toast(friendlyError(error));
           await loadEventData(true);
         }
-      }
-
-      async function addEnduranceTeam() {
-        const names = state.enduranceNames[activeCategory];
-        const newIndex = names.length;
-        const name = `第 ${names.length + 1} 組`;
-        const nextPosition = Math.max(-1, ...state.endurance[activeCategory].map(item => item.position)) + 1;
-        const { error } = await db.from("endurance_entries").insert({
-          event_id: eventId, category: activeCategory, name, position: nextPosition
-        });
-        if (error) return toast(friendlyError(error));
-        await loadEventData(true);
-        requestAnimationFrame(() => {
-          const input = document.querySelector(`[data-endurance-name="${newIndex}"]`);
-          input?.focus();
-          input?.select();
-        });
-      }
-
-      async function deleteEnduranceTeam(index) {
-        const names = state.enduranceNames[activeCategory];
-        if (names.length <= 1) return toast("最少要保留一個組別");
-        const name = names[index];
-        const item = state.endurance[activeCategory][index];
-        if ((item.running || item.elapsed > 0) && !confirm(`「${name}」已有計時紀錄，確定刪除？`)) return;
-        const { error } = await db.from("endurance_entries").update({ archived: true }).eq("id", item.id);
-        if (error) return toast(friendlyError(error));
-        await loadEventData(true);
-        toast(`已刪除「${name}」`);
       }
 
       const matchId = (round, match) => `r${round}-m${match}`;
@@ -1133,7 +1105,7 @@
       async function addBattleTeam() {
         const { error } = await db.rpc("add_battle_team", {
           target_event_id: eventId,
-          team_name: `第 ${state.teams.length + 1} 組`
+          team_name: null
         });
         if (error) return toast(friendlyError(error));
         await loadEventData(true);
@@ -1145,11 +1117,11 @@
 
       async function deleteBattleTeam(index) {
         const row = teamRows[index];
-        if (!row || !confirm(`確定刪除格鬥組別「${state.teams[index]}」？賽程會自動重排。`)) return;
+        if (!row || !confirm(`確定刪除「${state.teams[index]}」？其耐力紀錄亦會刪除，格鬥賽程會自動重排。`)) return;
         const { error } = await db.rpc("delete_battle_team", { target_team_id: row.id });
         if (error) return toast(friendlyError(error));
         await loadEventData(true);
-        toast("組別已刪除，賽程已重排");
+        toast("組別已從所有比賽刪除");
       }
 
       function switchView(view) {
@@ -1194,9 +1166,6 @@
         const timerButton = event.target.closest("[data-timer-action]");
         if (timerButton) enduranceAction(timerButton.dataset.timerAction, Number(timerButton.dataset.index));
 
-        const deleteEnduranceButton = event.target.closest("[data-delete-endurance]");
-        if (deleteEnduranceButton) deleteEnduranceTeam(Number(deleteEnduranceButton.dataset.deleteEndurance));
-
         const deleteBattleButton = event.target.closest("[data-delete-battle-team]");
         if (deleteBattleButton) deleteBattleTeam(Number(deleteBattleButton.dataset.deleteBattleTeam));
 
@@ -1213,26 +1182,6 @@
 
         const matchButton = event.target.closest("[data-match-action]");
         if (matchButton) matchTimerAction(matchButton.dataset.matchAction, matchButton.dataset.id);
-      });
-
-      document.addEventListener("change", async (event) => {
-        const input = event.target.closest("[data-endurance-name]");
-        if (!input) return;
-        const index = Number(input.dataset.enduranceName);
-        state.enduranceNames[activeCategory][index] = input.value.trim() || `第 ${index + 1} 組`;
-        input.value = state.enduranceNames[activeCategory][index];
-        renderEnduranceRanking();
-        const item = state.endurance[activeCategory][index];
-        const { error } = await db.from("endurance_entries")
-          .update({ name: input.value }).eq("id", item.id);
-        if (error) {
-          toast(friendlyError(error));
-          await loadEventData(true);
-        }
-      });
-
-      document.addEventListener("keydown", (event) => {
-        if (event.key === "Enter" && event.target.matches("[data-endurance-name]")) event.target.blur();
       });
 
       $("#saveSettingsBtn").addEventListener("click", async () => {
@@ -1266,7 +1215,6 @@
         toast(`${label}已重設`);
       });
 
-      $("#addEnduranceTeamBtn").addEventListener("click", addEnduranceTeam);
       $("#addBattleTeamBtn").addEventListener("click", addBattleTeam);
       $("#removeRoundBtn").addEventListener("click", () => changeRoundCount(-1));
       $("#addRoundBtn").addEventListener("click", () => changeRoundCount(1));

@@ -76,6 +76,8 @@ create table if not exists public.battle_matches (
 -- Keep the script safe to re-run after upgrading an earlier version.
 alter table public.endurance_entries
   add column if not exists archived boolean not null default false;
+alter table public.endurance_entries
+  add column if not exists battle_team_id uuid references public.battle_teams(id) on delete cascade;
 alter table public.events
   add column if not exists round_count integer not null default 9;
 alter table public.battle_matches
@@ -96,6 +98,17 @@ alter table public.battle_matches drop constraint if exists battle_matches_round
 alter table public.battle_matches add constraint battle_matches_round_number_check check (round_number >= 0);
 alter table public.battle_matches drop constraint if exists battle_matches_match_number_check;
 alter table public.battle_matches add constraint battle_matches_match_number_check check (match_number >= 0);
+
+update public.endurance_entries e
+set battle_team_id = t.id
+from public.battle_teams t
+where e.battle_team_id is null
+  and t.event_id = e.event_id
+  and t.team_number = e.position + 1;
+
+create unique index if not exists endurance_entries_team_category_idx
+  on public.endurance_entries(event_id, category, battle_team_id)
+  where battle_team_id is not null;
 
 create or replace function public.touch_updated_at()
 returns trigger
@@ -265,6 +278,10 @@ begin
     next_number,
     coalesce(nullif(trim(team_name), ''), '第 ' || next_number || ' 組')
   ) returning id into new_team_id;
+  insert into public.endurance_entries(event_id, battle_team_id, category, name, position)
+  values
+    (target_event_id, new_team_id, 'electric', coalesce(nullif(trim(team_name), ''), '第 ' || next_number || ' 組'), next_number - 1),
+    (target_event_id, new_team_id, 'manual', coalesce(nullif(trim(team_name), ''), '第 ' || next_number || ' 組'), next_number - 1);
   perform public.regenerate_battle_schedule(target_event_id, current_rounds);
   return new_team_id;
 end;
@@ -313,6 +330,7 @@ set search_path = ''
 as $$
 declare
   new_event_id uuid;
+  new_team_id uuid;
   normalized_code text := upper(trim(event_code));
 begin
   if auth.uid() is null then raise exception 'Authentication required'; end if;
@@ -331,13 +349,14 @@ begin
   values (new_event_id, auth.uid(), 'owner');
 
   for i in 1..13 loop
-    insert into public.endurance_entries(event_id, category, name, position)
-    values
-      (new_event_id, 'electric', '第 ' || i || ' 組', i - 1),
-      (new_event_id, 'manual', '第 ' || i || ' 組', i - 1);
-
     insert into public.battle_teams(event_id, team_number, name)
-    values (new_event_id, i, '第 ' || i || ' 組');
+    values (new_event_id, i, '第 ' || i || ' 組')
+    returning id into new_team_id;
+
+    insert into public.endurance_entries(event_id, battle_team_id, category, name, position)
+    values
+      (new_event_id, new_team_id, 'electric', '第 ' || i || ' 組', i - 1),
+      (new_event_id, new_team_id, 'manual', '第 ' || i || ' 組', i - 1);
   end loop;
 
   perform public.regenerate_battle_schedule(new_event_id, 9);
