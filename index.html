@@ -327,6 +327,35 @@
     th { position: sticky; top: 0; background: var(--card); color: var(--muted); font-size: 12px; }
     th:nth-child(2), td:nth-child(2) { text-align: left; }
     tbody tr:nth-child(-n+3) { background: rgba(243,184,63,.11); }
+    .leaderboard-picks {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin: 0 0 16px;
+    }
+    .leaderboard-pick {
+      border: 1px solid var(--line);
+      background: white;
+      border-radius: 14px;
+      padding: 14px 12px;
+      text-align: left;
+      font-weight: 800;
+    }
+    .leaderboard-pick small {
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .leaderboard-pick.active {
+      color: white;
+      border-color: var(--green);
+      background: var(--green);
+    }
+    .leaderboard-pick.active small { color: #d9eee6; }
+    .leaderboard-board table { font-size: 16px; }
+    .leaderboard-board .rank-time { font-variant-numeric: tabular-nums; }
     .table-wrap { max-height: 680px; overflow: auto; }
     .points { font-weight: 900; color: var(--green); }
 
@@ -436,6 +465,7 @@
     @media (max-width: 900px) {
       .endurance-layout, .battle-grid, .settings-grid { grid-template-columns: 1fr; }
       .ranking { position: static; }
+      .leaderboard-picks { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
     @media (max-width: 590px) {
       .shell { width: min(100% - 18px, 1320px); }
@@ -501,6 +531,7 @@
       <button class="tab active" data-view="endurance">耐力賽</button>
       <button class="tab" data-view="battle">單循環格鬥</button>
       <button class="tab" data-view="settings">隊伍設定</button>
+      <button class="tab" data-view="leaderboard">排行榜</button>
     </nav>
     <div class="actions">
       <button class="btn small" id="exportBtn">匯出紀錄</button>
@@ -537,6 +568,30 @@
         </div>
       </div>
       <div class="endurance-events" id="battleEvents"></div>
+    </section>
+
+    <section class="view" id="leaderboardView">
+      <div class="section-head">
+        <div>
+          <h2>即時排行榜</h2>
+          <p class="hint">揀一場賽事檢閱。成績會隨 Helper 操作即時更新。</p>
+        </div>
+      </div>
+      <div class="leaderboard-picks" id="leaderboardPicks">
+        <button class="leaderboard-pick active" data-leaderboard="endurance-electric">耐力賽 · 電動組<small>時間越長排名越高</small></button>
+        <button class="leaderboard-pick" data-leaderboard="endurance-manual">耐力賽 · 手動組<small>時間越長排名越高</small></button>
+        <button class="leaderboard-pick" data-leaderboard="battle-electric">格鬥賽 · 電動組<small>勝場 3 分</small></button>
+        <button class="leaderboard-pick" data-leaderboard="battle-manual">格鬥賽 · 手動組<small>勝場 3 分</small></button>
+      </div>
+      <div class="panel leaderboard-board">
+        <div class="section-head">
+          <div>
+            <h2 style="font-size:20px" id="leaderboardTitle">耐力賽 · 電動組</h2>
+            <p class="hint" id="leaderboardHint">時間越長排名越高</p>
+          </div>
+        </div>
+        <div class="table-wrap" id="leaderboardTable"></div>
+      </div>
     </section>
 
     <section class="view" id="settingsView">
@@ -605,6 +660,12 @@
         { id: "electric", label: "電動組" },
         { id: "manual", label: "手動組" }
       ];
+      const LEADERBOARDS = [
+        { id: "endurance-electric", kind: "endurance", category: "electric", title: "耐力賽 · 電動組", hint: "時間越長排名越高" },
+        { id: "endurance-manual", kind: "endurance", category: "manual", title: "耐力賽 · 手動組", hint: "時間越長排名越高" },
+        { id: "battle-electric", kind: "battle", category: "electric", title: "格鬥賽 · 電動組", hint: "同分：勝場 → 盤差 → 得盤" },
+        { id: "battle-manual", kind: "battle", category: "manual", title: "格鬥賽 · 手動組", hint: "同分：勝場 → 盤差 → 得盤" }
+      ];
 
       const defaultState = () => ({
         eventName: "陀螺 Fun Day",
@@ -632,6 +693,7 @@
       let reloadTimer = null;
       let toastTimer;
       let loadSeq = 0;
+      let activeLeaderboard = "endurance-electric";
       const pendingEndurance = new Map();
 
       const $ = (selector) => document.querySelector(selector);
@@ -806,6 +868,7 @@
         renderTimers();
         renderBattle();
         renderSettings();
+        renderLeaderboard();
         setConnection("online", "已即時連線");
       }
 
@@ -1144,6 +1207,63 @@
           </tr>`).join("");
       }
 
+      function currentLeaderboard() {
+        return LEADERBOARDS.find(item => item.id === activeLeaderboard) || LEADERBOARDS[0];
+      }
+
+      function enduranceLeaderboardHtml(category) {
+        const ranked = (state.endurance[category] || [])
+          .map((item, i) => ({
+            i,
+            name: state.teams[i] || `第 ${i + 1} 組`,
+            time: recordTime(item),
+            live: item.running && currentElapsed(item) > (item.bestElapsed || 0)
+          }))
+          .sort((a, b) => b.time - a.time || a.i - b.i);
+        if (!ranked.length) return `<div class="empty">尚未有計時紀錄</div>`;
+        return `
+          <table>
+            <thead>
+              <tr><th>#</th><th>組別</th><th>最佳時間</th><th>狀態</th></tr>
+            </thead>
+            <tbody>
+              ${ranked.map((row, rank) => `
+                <tr>
+                  <td>${rank + 1}</td>
+                  <td><strong>${escapeHtml(row.name)}</strong></td>
+                  <td class="rank-time">${row.time ? formatTime(row.time) : "—"}</td>
+                  <td>${row.live ? "計時中" : row.time ? "已有紀錄" : "未開始"}</td>
+                </tr>`).join("")}
+            </tbody>
+          </table>`;
+      }
+
+      function battleLeaderboardHtml(category) {
+        return `
+          <table>
+            <thead>
+              <tr><th>#</th><th>組別</th><th>賽</th><th>勝</th><th>負</th><th>盤差</th><th>分</th></tr>
+            </thead>
+            <tbody>${standingsHtml(category)}</tbody>
+          </table>`;
+      }
+
+      function renderLeaderboard() {
+        const board = currentLeaderboard();
+        $$("#leaderboardPicks .leaderboard-pick").forEach(btn => {
+          btn.classList.toggle("active", btn.dataset.leaderboard === board.id);
+        });
+        const title = $("#leaderboardTitle");
+        const hint = $("#leaderboardHint");
+        const table = $("#leaderboardTable");
+        if (!title || !table) return;
+        title.textContent = board.title;
+        if (hint) hint.textContent = board.hint;
+        table.innerHTML = board.kind === "endurance"
+          ? enduranceLeaderboardHtml(board.category)
+          : battleLeaderboardHtml(board.category);
+      }
+
       function matchesHtml(category) {
         const battle = battleState(category);
         const r = battle.activeRound;
@@ -1358,6 +1478,7 @@
         $$(".view").forEach(el => el.classList.toggle("active", el.id === `${view}View`));
         if (view === "battle") renderBattle();
         if (view === "settings") renderSettings();
+        if (view === "leaderboard") renderLeaderboard();
       }
 
       function exportData() {
@@ -1393,6 +1514,12 @@
 
         const timerButton = event.target.closest("[data-timer-action]");
         if (timerButton) enduranceAction(timerButton.dataset.timerAction, timerButton.dataset.category, Number(timerButton.dataset.index));
+
+        const leaderboardPick = event.target.closest("[data-leaderboard]");
+        if (leaderboardPick) {
+          activeLeaderboard = leaderboardPick.dataset.leaderboard;
+          renderLeaderboard();
+        }
 
         const resetCategoryButton = event.target.closest("[data-reset-category]");
         if (resetCategoryButton) resetEnduranceCategory(resetCategoryButton.dataset.resetCategory);
@@ -1500,7 +1627,12 @@
             if (display) display.textContent = formatTime(currentElapsed(item));
           });
         });
-        if (enduranceChanged) renderEnduranceRanking();
+        if (enduranceChanged) {
+          renderEnduranceRanking();
+          if ($("#leaderboardView")?.classList.contains("active") && currentLeaderboard().kind === "endurance") {
+            renderLeaderboard();
+          }
+        }
 
         CATEGORIES.forEach(({ id }) => {
           Object.entries(battleState(id).matches).forEach(([matchKey, data]) => {
