@@ -6,7 +6,7 @@
 
 1. 到 [supabase.com](https://supabase.com) 建立免費項目。
 2. 在 **Authentication → Providers → Anonymous Sign-Ins** 啟用匿名登入。
-3. 開啟 **SQL Editor**，貼上並執行 [`supabase/schema.sql`](supabase/schema.sql) 的全部內容。
+3. 開啟 **SQL Editor**，貼上並執行 [`supabase/schema.sql`](supabase/schema.sql) 的全部內容。之後若更新過此檔，再執行一次即可（可重複執行）。
 4. 到 **Project Settings → API** 複製：
    - Project URL
    - `anon` / publishable key 
@@ -51,6 +51,9 @@ npx serve .
 ## 即時同步行為
 
 - 耐力計時只在開始、完成或重設時寫入資料庫；畫面根據伺服器開始時間自行更新。
+- 電動組與手動組在同一頁分開顯示，計時、排名和重設互不影響。
+- 單循環格鬥同樣分開電動組與手動組，各自有賽程、計時和積分榜。
+- 每組可多次嘗試，排名只保留該組最長時間；未破紀錄的嘗試不會蓋過舊成績。
 - 每場格鬥倒數可獨立運行，不同 Helper 可同時負責不同場次。
 - 斷線時右上角會顯示「離線」；恢復網絡後會重新載入最新資料。
 - 同一欄位若被兩位 Helper 同時修改，以資料庫最後收到的操作為準。
