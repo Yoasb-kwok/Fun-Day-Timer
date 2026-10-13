@@ -1,59 +1,81 @@
-# 陀螺 Fun Day 多人即時計分
+# 陀螺 Fun Day 多人計分
 
-這個版本使用 Supabase Realtime。不同 Helper 可在手機、平板或電腦開啟同一網址，以活動代碼及共用密碼加入，所有計時、名稱、比分和排名會同步更新。
+Helper 用同一網址、活動代碼及共用密碼加入。計時、隊名、比分和排名寫入 Postgres，其他裝置約每 1.5 秒輪詢更新。畫面仍是傳統中文。
 
-## 1. 建立 Supabase 項目
+這個版本不再使用 Supabase。瀏覽器只呼叫同一個網域的 `/api/...`。
 
-1. 到 [supabase.com](https://supabase.com) 建立免費項目。
-2. 在 **Authentication → Providers → Anonymous Sign-Ins** 啟用匿名登入。
-3. 開啟 **SQL Editor**，貼上並執行 [`supabase/schema.sql`](supabase/schema.sql) 的全部內容。之後若更新過此檔，再執行一次即可（可重複執行）。
-4. 到 **Project Settings → API** 複製：
-   - Project URL
-   - `anon` / publishable key 
-5. 在 [`supabase-config.js`](supabase-config.js) 填入這兩個公開值：
+## 環境變數
 
-```js
-window.SUPABASE_CONFIG = {
-  url: "https://wpqbmdivywjmkobzwmsi.supabase.co/rest/v1/",
-  anonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndwcWJtZGl2eXdqbWtvYnp3bXNpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY0OTQyOTksImV4cCI6MjEwMjA3MDI5OX0.D_Xnjvo-Qvvh5-c43jhwlTFgfQVwGsjhe103h4wVkaI"
-};
+| 變數 | 必要性 | 說明 |
+| --- | --- | --- |
+| `DATABASE_URL` | 必填 | Postgres 連線字串。正式環境用 Railway Postgres 的公開網址，讓 Vercel 連得到。不要把真實密碼提交到 git。 |
+| `SESSION_SECRET` | 可選 | 簽署 Helper session cookie。不設時會由 `DATABASE_URL` 衍生，同一資料庫的所有 instance 可以共用 cookie。 |
+
+本機可複製 [`.env.example`](.env.example)。Vercel 專案 **fun-day-timer** 的 Production 必須設定 `DATABASE_URL`（合併前或合併後都可以，未設定時登入頁會顯示尚未設定資料庫）。
+
+## 資料表
+
+[`db/schema.sql`](db/schema.sql) 是純 Postgres schema（`lib/schema.sql` 是同一份，給 serverless 函式讀取）。API 冷啟動時會自動執行，使用 `CREATE TABLE IF NOT EXISTS`，不需要另外跑 migration。
+
+- `events`：活動代碼、名稱、學校、密碼雜湊（scrypt）、格鬥輪次、結算時間
+- `battle_teams`：組別
+- `endurance_entries`：電動組／手動組耐力計時與最佳時間
+- `battle_matches`：單循環對賽、盤數、2 分鐘計時
+
+沒有 Supabase Auth、RLS 或 Realtime。Helper 密碼核對成功後，伺服器設定 HttpOnly cookie。
+
+## 本機測試（不需要 Supabase）
+
+需要 Node.js 20+ 和一個空的 Postgres 資料庫。
+
+```bash
+npm install
+export DATABASE_URL=postgres://fun_day:fun_day@127.0.0.1:5432/fun_day_test
+export SESSION_SECRET=local-dev-secret
+npm start
 ```
 
-`anon` key 本來就是供瀏覽器使用，資料安全由 `schema.sql` 的 Row Level Security 規則保障。不要把 Supabase `service_role` key 放入此檔案。
+開啟 `http://127.0.0.1:3000`：
 
-## 2. 本機測試
-
-在本資料夾啟動靜態伺服器，例如：
-
-```powershell
-npx serve .
-```
-
-開啟顯示的 localhost 網址。第一次使用：
-
-1. 輸入 3–20 位英文字母、數字或 `-` 作活動代碼。
-2. 輸入最少 4 個字元的 Helper 密碼。
+1. 活動代碼用 3–20 位英文字母、數字或 `-`。
+2. Helper 密碼最少 4 個字元。
 3. 按「建立新活動」。
-4. 其他 Helper 使用同一活動代碼和密碼按「加入活動」。
+4. 另一部瀏覽器或無痕視窗用同一代碼和密碼按「加入活動」。
 
-建立活動時會自動產生 13 組、兩類耐力賽名單，以及 9 輪格鬥賽程。
+建立活動時會產生 13 組、電動組與手動組耐力名單，以及各 9 輪格鬥賽程。
 
-## 3. 部署到 Vercel
+自動測試：
 
-最簡單的方法是把資料夾上載至 GitHub，再在 [vercel.com](https://vercel.com) 選擇 **Add New Project → Import**：
+```bash
+npm test
+```
+
+測試會自行建表。請指到一個可以清空的資料庫，因為測試會 `TRUNCATE events`。
+
+## 部署到 Vercel
+
+專案已經以 **fun-day-timer** 部署。保持：
 
 - Framework Preset：`Other`
 - Build Command：留空
 - Output Directory：`.`
 
-部署後把 Vercel 網址傳給 Helper 即可。更新檔案並重新部署不會清除 Supabase 內的賽事紀錄。
+`/api` 是 Vercel serverless function，靜態頁面仍是根目錄的 `index.html`。
 
-## 即時同步行為
+CI/CD 或 Vercel 專案設定要做的事：
 
-- 耐力計時只在開始、完成或重設時寫入資料庫；畫面根據伺服器開始時間自行更新。
-- 電動組與手動組在同一頁分開顯示，計時、排名和重設互不影響。
-- 單循環格鬥同樣分開電動組與手動組，各自有賽程、計時和積分榜。
-- 每組可多次嘗試，排名只保留該組最長時間；未破紀錄的嘗試不會蓋過舊成績。
-- 每場格鬥倒數可獨立運行，不同 Helper 可同時負責不同場次。
-- 斷線時右上角會顯示「離線」；恢復網絡後會重新載入最新資料。
-- 同一欄位若被兩位 Helper 同時修改，以資料庫最後收到的操作為準。
+1. 在 Railway 取得 Postgres 連線字串。
+2. 在 Vercel Production（以及需要預覽的 Preview）設定 `DATABASE_URL`。
+3. 可選：設定長隨機字串 `SESSION_SECRET`。
+4. 合併或重新部署後，第一次請求會自動建表。
+
+更新程式不會清掉資料庫裡的賽事紀錄。
+
+## 同步行為
+
+- 耐力計時只在開始、完成、重設或清除紀錄時寫入；畫面用伺服器開始時間自己走。
+- 電動組與手動組分開計時、分開按總分排名。總分 = 最佳時間的秒數（兩位小數）。只有更長的嘗試才會更新紀錄。
+- 格鬥賽分開電動組與手動組。勝一場 3 分。可隨時按「結算總分」，其他 Helper 會在下一輪輪詢看到。
+- 分桌表列出電動組 12 桌及手動組 12 桌，可列印。
+- 右上角「已連線」表示最近一次輪詢成功。斷線時顯示「離線」或「同步失敗」。
+- 兩位 Helper 同時改同一場格鬥時，後寫入的一方會看到「另一位 Helper 剛剛更新了此場」。
