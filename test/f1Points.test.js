@@ -1,6 +1,6 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { F1_POINTS, f1PointsForPlace, rankEndurance, rankBattle, combinePlacePoints } = require("../lib/f1Points");
+const { F1_POINTS, f1PointsForPlace, rankEndurance, rankBattle, combinePlacePoints, overallTeamTotals } = require("../lib/f1Points");
 
 test("F1 place points match the default table and pay nothing from 11th", () => {
   assert.deepEqual([...F1_POINTS], [25, 18, 15, 12, 10, 8, 6, 4, 2, 1]);
@@ -119,6 +119,20 @@ test("combined ties prefer the better electric place, then the smaller table", (
   );
   assert.deepEqual(combined.map((row) => row.name), ["前", "後"]);
   assert.deepEqual(combined.map((row) => row.points), [43, 43]);
+});
+
+test("overall total sums one team's F1 points across all four boards", () => {
+  const ranked = overallTeamTotals([
+    { index: 0, name: "甲", tableNo: 1, enduranceElectric: 25, enduranceManual: 0, battleElectric: 18, battleManual: 0 },
+    { index: 1, name: "乙", tableNo: 2, enduranceElectric: 18, enduranceManual: 15, battleElectric: 0, battleManual: 25 },
+    { index: 2, name: "丙", tableNo: 3 }
+  ]);
+  assert.deepEqual(ranked.map((row) => [row.name, row.points, row.order]), [
+    ["乙", 58, 1],
+    ["甲", 43, 2],
+    ["丙", 0, 3]
+  ]);
+  assert.equal(ranked[0].points, 18 + 15 + 0 + 25);
 });
 
 test("battle ties break by goal difference, games for, then team order", () => {

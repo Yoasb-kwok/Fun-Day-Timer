@@ -373,6 +373,7 @@
     .roster-sheet table { background: white; }
     .roster-sheet th, .roster-sheet td { border: 1px solid #d5dfd9; }
     .roster-sheet .table-no { font-weight: 900; font-variant-numeric: tabular-nums; width: 4.5rem; }
+    .overall-board { margin-bottom: 16px; }
     .rotation-sheet tbody tr:nth-child(-n+3) { background: transparent; }
     .rotation-sheet tr.table-start td { border-top: 2px solid #9eb5ab; }
 
@@ -595,8 +596,17 @@
       <div class="section-head">
         <div>
           <h2>即時排行榜</h2>
-          <p class="hint">揀一場賽事檢閱。成績會隨 Helper 操作同步更新。</p>
+          <p class="hint">上方是總排行榜：每組四項 F1 總分相加。下方可揀單一賽事檢閱。成績會隨 Helper 操作同步更新。</p>
         </div>
+      </div>
+      <div class="panel leaderboard-board overall-board" id="overallPanel">
+        <div class="section-head">
+          <div>
+            <h2 style="font-size:20px">總排行榜</h2>
+            <p class="hint">總分 = 該組四項 F1 積分相加：耐力電動 + 耐力手動 + 格鬥電動 + 格鬥手動。未有名次的一項計 0。</p>
+          </div>
+        </div>
+        <div class="table-wrap" id="overallTable"></div>
       </div>
       <div class="leaderboard-picks" id="leaderboardPicks">
         <button class="leaderboard-pick active" data-leaderboard="endurance-electric">耐力賽 · 電動組<small>總分 = F1 名次積分</small></button>
@@ -1353,7 +1363,53 @@
           </table>`;
       }
 
+      function f1ForTeam(rows, index) {
+        const row = rows.find(item => item.index === index);
+        return row && row.place ? row.points : 0;
+      }
+
+      function overallTeams({ live = true } = {}) {
+        return state.teams.map((name, index) => ({
+          index,
+          name,
+          tableNo: tableNumber(index),
+          enduranceElectric: f1ForTeam(enduranceBoardRows("electric", { live }), index),
+          enduranceManual: f1ForTeam(enduranceBoardRows("manual", { live }), index),
+          battleElectric: f1ForTeam(getStandings("electric"), index),
+          battleManual: f1ForTeam(getStandings("manual"), index)
+        }));
+      }
+
+      function renderOverall() {
+        const el = $("#overallTable");
+        if (!el) return;
+        const ranked = FunDayF1.overallTeamTotals(overallTeams());
+        if (!ranked.length) {
+          el.innerHTML = `<div class="empty">尚未有組別</div>`;
+          return;
+        }
+        el.innerHTML = `
+          <table>
+            <thead>
+              <tr><th>#</th><th>組別</th><th>耐力電動</th><th>耐力手動</th><th>格鬥電動</th><th>格鬥手動</th><th>總分</th></tr>
+            </thead>
+            <tbody>
+              ${ranked.map(row => `
+                <tr>
+                  <td>${row.order}</td>
+                  <td><strong>${escapeHtml(row.name)}</strong></td>
+                  <td>${row.enduranceElectric}</td>
+                  <td>${row.enduranceManual}</td>
+                  <td>${row.battleElectric}</td>
+                  <td>${row.battleManual}</td>
+                  <td class="points">${row.points}</td>
+                </tr>`).join("")}
+            </tbody>
+          </table>`;
+      }
+
       function renderLeaderboard() {
+        renderOverall();
         const board = currentLeaderboard();
         $$("#leaderboardPicks .leaderboard-pick").forEach(btn => {
           btn.classList.toggle("active", btn.dataset.leaderboard === board.id);
@@ -1758,6 +1814,7 @@
             ),
             battle: FunDayF1.combinePlacePoints(getStandings("electric"), getStandings("manual"))
           },
+          overall: FunDayF1.overallTeamTotals(overallTeams({ live: false })),
           battleMatches: {
             electric: state.battle.electric.matches,
             manual: state.battle.manual.matches
@@ -1891,8 +1948,9 @@
         });
         if (enduranceChanged) {
           renderEnduranceRanking();
-          if ($("#leaderboardView")?.classList.contains("active") && currentLeaderboard().kind === "endurance") {
-            renderLeaderboard();
+          if ($("#leaderboardView")?.classList.contains("active")) {
+            if (currentLeaderboard().kind === "endurance") renderLeaderboard();
+            else renderOverall();
           }
         }
 

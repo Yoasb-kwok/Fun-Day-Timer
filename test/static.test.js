@@ -50,6 +50,9 @@ test("page no longer loads Supabase and keeps the Traditional Chinese labels", (
   assert.ok(html.includes("FunDayF1.rankEndurance"));
   assert.ok(html.includes("FunDayF1.rankBattle"));
   assert.ok(html.includes("FunDayF1.combinePlacePoints"));
+  assert.ok(html.includes("總排行榜"));
+  assert.ok(html.includes("該組四項 F1 積分相加：耐力電動 + 耐力手動 + 格鬥電動 + 格鬥手動"));
+  assert.ok(html.includes("FunDayF1.overallTeamTotals"));
   assert.ok(html.includes("FunDayRotation.rotationSheet"));
   assert.ok(html.includes("<th>桌號</th><th>A組</th><th>B組</th><th>輪次</th><th>邊</th>"));
   assert.ok(html.includes("FunDayRotation.scanRows"));
