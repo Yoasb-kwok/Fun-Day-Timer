@@ -603,8 +603,8 @@
         <button class="leaderboard-pick" data-leaderboard="endurance-manual">耐力賽 · 手動組<small>總分 = F1 名次積分</small></button>
         <button class="leaderboard-pick" data-leaderboard="battle-electric">格鬥賽 · 電動組<small>總分 = F1 名次積分</small></button>
         <button class="leaderboard-pick" data-leaderboard="battle-manual">格鬥賽 · 手動組<small>總分 = F1 名次積分</small></button>
-        <button class="leaderboard-pick" data-leaderboard="endurance-combined">耐力賽 · 綜合總分<small>電動第N + 手動第N</small></button>
-        <button class="leaderboard-pick" data-leaderboard="battle-combined">格鬥賽 · 綜合總分<small>電動第N + 手動第N</small></button>
+        <button class="leaderboard-pick" data-leaderboard="endurance-combined">耐力賽 · 綜合總分<small>電動第N名 + 手動第N名</small></button>
+        <button class="leaderboard-pick" data-leaderboard="battle-combined">格鬥賽 · 綜合總分<small>電動第N名 + 手動第N名</small></button>
       </div>
       <div class="panel leaderboard-board">
         <div class="section-head">
@@ -713,8 +713,8 @@
         { id: "endurance-manual", kind: "endurance", category: "manual", title: "耐力賽 · 手動組", hint: `${F1_HINT}。時間較長名次較前；同分則桌號較小者在前` },
         { id: "battle-electric", kind: "battle", category: "electric", title: "格鬥賽 · 電動組", hint: `${F1_HINT}。名次：勝場 → 盤差 → 得盤；尚未出賽沒有名次` },
         { id: "battle-manual", kind: "battle", category: "manual", title: "格鬥賽 · 手動組", hint: `${F1_HINT}。名次：勝場 → 盤差 → 得盤；尚未出賽沒有名次` },
-        { id: "endurance-combined", kind: "endurance-combined", title: "耐力賽 · 綜合總分", hint: "總分 = 電動第N名的 F1 積分 + 手動第N名的 F1 積分。未有名次的一側計 0，總分不再換算一次。" },
-        { id: "battle-combined", kind: "battle-combined", title: "格鬥賽 · 綜合總分", hint: "總分 = 電動第N名的 F1 積分 + 手動第N名的 F1 積分。未有名次的一側計 0，總分不再換算一次。" }
+        { id: "endurance-combined", kind: "endurance-combined", title: "耐力賽 · 綜合總分", hint: "同一名次配對相加：電動第1名 F1 + 手動第1名 F1，然後第2名、第3名，如此類推。某一邊沒有該名次則該側計 0。" },
+        { id: "battle-combined", kind: "battle-combined", title: "格鬥賽 · 綜合總分", hint: "同一名次配對相加：電動第1名 F1 + 手動第1名 F1，然後第2名、第3名，如此類推。某一邊沒有該名次則該側計 0。" }
       ];
 
       const defaultState = () => ({
@@ -1379,29 +1379,24 @@
               : battleLeaderboardHtml(board.category);
       }
 
-      function formatPlaceLabel(place) {
-        return place ? `第${place}名` : "—";
-      }
-
       function combinedLeaderboardHtml(kind) {
         const electric = kind === "endurance" ? enduranceBoardRows("electric") : getStandings("electric");
         const manual = kind === "endurance" ? enduranceBoardRows("manual") : getStandings("manual");
         const ranked = FunDayF1.combinePlacePoints(electric, manual);
-        if (!ranked.length) return `<div class="empty">尚未有組別</div>`;
+        if (!ranked.length) return `<div class="empty">尚未有名次</div>`;
         return `
           <table>
             <thead>
-              <tr><th>#</th><th>組別</th><th>電動名次</th><th>電動積分</th><th>手動名次</th><th>手動積分</th><th>總分</th></tr>
+              <tr><th>名次</th><th>電動組</th><th>電動積分</th><th>手動組</th><th>手動積分</th><th>總分</th></tr>
             </thead>
             <tbody>
               ${ranked.map(row => `
                 <tr>
-                  <td>${row.order}</td>
-                  <td><strong>${escapeHtml(row.name)}</strong></td>
-                  <td>${formatPlaceLabel(row.electricPlace)}</td>
-                  <td>${row.electricPlace ? row.electricPoints : "—"}</td>
-                  <td>${formatPlaceLabel(row.manualPlace)}</td>
-                  <td>${row.manualPlace ? row.manualPoints : "—"}</td>
+                  <td>第${row.place}名</td>
+                  <td>${row.electricName ? `<strong>${escapeHtml(row.electricName)}</strong>` : "—"}</td>
+                  <td>${row.electricName ? row.electricPoints : "—"}</td>
+                  <td>${row.manualName ? `<strong>${escapeHtml(row.manualName)}</strong>` : "—"}</td>
+                  <td>${row.manualName ? row.manualPoints : "—"}</td>
                   <td class="points">${row.points}</td>
                 </tr>`).join("")}
             </tbody>
