@@ -1,6 +1,6 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { F1_POINTS, f1PointsForPlace, rankEndurance, rankBattle } = require("../lib/f1Points");
+const { F1_POINTS, f1PointsForPlace, rankEndurance, rankBattle, combinePlacePoints } = require("../lib/f1Points");
 
 test("F1 place points match the default table and pay nothing from 11th", () => {
   assert.deepEqual([...F1_POINTS], [25, 18, 15, 12, 10, 8, 6, 4, 2, 1]);
@@ -83,6 +83,42 @@ test("battle totals are F1 points for the classification, not 3 per win", () => 
   ]);
   assert.equal(ranked[0].points, 25);
   assert.notEqual(ranked[0].points, ranked[0].wins * 3);
+});
+
+test("combined total adds electric place points and manual place points", () => {
+  const electric = [
+    { index: 0, name: "甲", tableNo: 1, place: 1, points: 25 },
+    { index: 1, name: "乙", tableNo: 2, place: 2, points: 18 },
+    { index: 2, name: "丙", tableNo: 3, place: null, points: 0 }
+  ];
+  const manual = [
+    { index: 0, name: "甲", tableNo: 1, place: 3, points: 15 },
+    { index: 1, name: "乙", tableNo: 2, place: 1, points: 25 },
+    { index: 2, name: "丙", tableNo: 3, place: 11, points: 0 }
+  ];
+  const combined = combinePlacePoints(electric, manual);
+  assert.deepEqual(combined.map((row) => [row.name, row.electricPoints, row.manualPoints, row.points, row.order]), [
+    ["乙", 18, 25, 43, 1],
+    ["甲", 25, 15, 40, 2],
+    ["丙", 0, 0, 0, 3]
+  ]);
+  assert.equal(combined[0].points, 43);
+  assert.notEqual(combined[0].points, f1PointsForPlace(combined[0].order));
+});
+
+test("combined ties prefer the better electric place, then the smaller table", () => {
+  const combined = combinePlacePoints(
+    [
+      { index: 1, name: "後", tableNo: 4, place: 2, points: 18 },
+      { index: 0, name: "前", tableNo: 2, place: 1, points: 25 }
+    ],
+    [
+      { index: 0, name: "前", tableNo: 2, place: 2, points: 18 },
+      { index: 1, name: "後", tableNo: 4, place: 1, points: 25 }
+    ]
+  );
+  assert.deepEqual(combined.map((row) => row.name), ["前", "後"]);
+  assert.deepEqual(combined.map((row) => row.points), [43, 43]);
 });
 
 test("battle ties break by goal difference, games for, then team order", () => {

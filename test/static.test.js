@@ -25,6 +25,8 @@ test("page no longer loads Supabase and keeps the Traditional Chinese labels", (
     "單循環格鬥",
     "結算總分",
     "排行榜",
+    "輪轉表",
+    "綜合總分",
     "分桌表",
     "電動組",
     "手動組",
@@ -39,8 +41,13 @@ test("page no longer loads Supabase and keeps the Traditional Chinese labels", (
   assert.ok(html.includes('"/api/session"'));
   assert.ok(html.includes("ROSTER_TABLES = 12"));
   assert.ok(html.includes('src="lib/f1Points.js"'));
+  assert.ok(html.includes('src="lib/rotation.js"'));
   assert.ok(html.includes("FunDayF1.rankEndurance"));
   assert.ok(html.includes("FunDayF1.rankBattle"));
+  assert.ok(html.includes("FunDayF1.combinePlacePoints"));
+  assert.ok(html.includes("FunDayRotation.rotationSheet"));
+  assert.ok(html.includes("<th>桌號</th><th>A組</th><th>B組</th><th>輪次</th>"));
+  assert.ok(html.includes("電動第N + 手動第N"));
   assert.ok(html.includes("第1名 25、第2名 18、第3名 15、第4名 12、第5名 10、第6名 8、第7名 6、第8名 4、第9名 2、第10名 1，第11名及以後 0"));
   assert.equal(html.includes("83.45"), false);
   assert.equal(html.includes("勝場 × 3"), false);
