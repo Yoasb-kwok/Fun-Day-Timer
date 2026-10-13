@@ -15,6 +15,20 @@ test("rotation rows are table, the two teams, and the round", () => {
   assert.deepEqual(sheet.byes, [{ round: 1, teamIndex: 4 }]);
 });
 
+test("each side is tables 1-6, never a shared 1-12", () => {
+  const { TABLES_PER_SIDE } = require("../lib/rotation");
+  assert.equal(TABLES_PER_SIDE, 6);
+  const eight = Array.from({ length: 8 }, (_, n) => ({ a: n, b: n + 20, n }));
+  const electric = rotationSheet([{ matches: eight, bye: null }]);
+  const manual = rotationSheet([{ matches: eight, bye: null }]);
+  assert.deepEqual(electric.rows.map((row) => row.table), [1, 2, 3, 4, 5, 6]);
+  assert.deepEqual(manual.rows.map((row) => row.table), [1, 2, 3, 4, 5, 6]);
+  assert.equal(electric.overflow.length, 2);
+  assert.equal(manual.overflow.length, 2);
+  assert.ok(electric.rows.every((row) => row.table <= 6));
+  assert.ok(manual.rows.every((row) => row.table <= 6));
+});
+
 test("rotation keeps match numbers as table numbers even if listed out of order", () => {
   const sheet = rotationSheet([
     { matches: [{ a: 3, b: 1, n: 2 }, { a: 0, b: 2, n: 0 }], bye: -1 }

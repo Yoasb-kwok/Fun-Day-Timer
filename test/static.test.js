@@ -39,7 +39,12 @@ test("page no longer loads Supabase and keeps the Traditional Chinese labels", (
   assert.ok(html.includes('const POLL_MS = 1500'));
   assert.ok(html.includes('"/api/state"'));
   assert.ok(html.includes('"/api/session"'));
-  assert.ok(html.includes("ROSTER_TABLES = 12"));
+  assert.ok(html.includes("FunDayRotation.TABLES_PER_SIDE"));
+  assert.ok(html.includes("不是共用 1–12"));
+  assert.ok(html.includes("此邊桌號 1–6"));
+  assert.equal(html.includes("ROSTER_TABLES = 12"), false);
+  assert.equal(html.includes("各 12 組"), false);
+  assert.equal(html.includes("桌號 1–12"), false);
   assert.ok(html.includes('src="lib/f1Points.js"'));
   assert.ok(html.includes('src="lib/rotation.js"'));
   assert.ok(html.includes("FunDayF1.rankEndurance"));

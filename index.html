@@ -624,7 +624,7 @@
       <div class="section-head no-print">
         <div>
           <h2>對陣輪轉</h2>
-          <p class="hint">格鬥賽每輪一張表：桌號、A組、B組、輪次。電動組與手動組分開，可直接列印給各桌跟從。</p>
+          <p class="hint">格鬥賽每輪一張表：桌號、A組、B組、輪次。現場共 12 桌：手動組桌號 1–6、電動組桌號 1–6。兩邊各自從 1 起計，不是共用 1–12。</p>
         </div>
         <button class="btn small primary" type="button" id="printRotationBtn">列印輪轉表</button>
       </div>
@@ -635,7 +635,7 @@
       <div class="section-head no-print">
         <div>
           <h2>分桌表</h2>
-          <p class="hint">列出電動組 12 桌及手動組 12 桌，按桌號由小至大，方便列印給各組跟從。</p>
+          <p class="hint">現場共 12 桌：手動組 1–6、電動組 1–6。兩邊各自從 1 起計，不是共用 1–12。</p>
         </div>
         <button class="btn small primary" type="button" id="printRosterBtn">列印分桌表</button>
       </div>
@@ -708,7 +708,7 @@
         { id: "electric", label: "電動組" },
         { id: "manual", label: "手動組" }
       ];
-      const ROSTER_TABLES = 12;
+      const TABLES_PER_SIDE = FunDayRotation.TABLES_PER_SIDE;
       const F1_HINT = "總分 = F1 名次積分（第1名25、第2名18、第3名15、第4名12、第5名10、第6名8、第7名6、第8名4、第9名2、第10名1，第11名及以後0）";
       const LEADERBOARDS = [
         { id: "endurance-electric", kind: "endurance", category: "electric", title: "耐力賽 · 電動組", hint: `${F1_HINT}。時間較長名次較前；同分則桌號較小者在前` },
@@ -1669,12 +1669,15 @@
                 ${bye}
               </div>`;
           }).join("");
-          return `<section class="roster-block"><h2>${cat.label}</h2>${body}</section>`;
+          const overflowNote = sheet.overflow.length
+            ? `<p class="hint">有 ${sheet.overflow.length} 場超出此邊 6 桌，沒有編成桌號 7 或以後。</p>`
+            : "";
+          return `<section class="roster-block"><h2>${cat.label} · 桌號 1–6</h2><p class="hint">此邊桌號 1–6，不順延到另一邊</p>${body}${overflowNote}</section>`;
         }).join("");
         root.innerHTML = `
           <div class="roster-head">
             <h2 class="roster-event">${escapeHtml(state.eventName || "陀螺 Fun Day")}</h2>
-            <p class="hint">${escapeHtml(state.schoolName || "")} · 對陣輪轉（桌號、A組、B組、輪次）</p>
+            <p class="hint">${escapeHtml(state.schoolName || "")} · 對陣輪轉。手動組桌號 1–6、電動組桌號 1–6，不是共用 1–12。</p>
           </div>
           <div class="rotation-stack">${blocks}</div>`;
       }
@@ -1684,16 +1687,16 @@
         if (!root) return;
         const source = rosterSource();
         const byNumber = new Map(source.map(row => [row.teamNumber, row.name]));
-        const extra = source.filter(row => row.teamNumber > ROSTER_TABLES);
+        const extra = source.filter(row => row.teamNumber > TABLES_PER_SIDE);
         const blocks = CATEGORIES.map(cat => {
-          const body = Array.from({ length: ROSTER_TABLES }, (_, i) => {
+          const body = Array.from({ length: TABLES_PER_SIDE }, (_, i) => {
             const tableNo = i + 1;
             const name = byNumber.get(tableNo) || `第 ${tableNo} 組`;
             return `<tr><td class="table-no">${tableNo}</td><td><strong>${escapeHtml(name)}</strong></td><td>${cat.label}</td></tr>`;
           }).join("");
           return `
             <section class="roster-block">
-              <h2>${cat.label}</h2>
+              <h2>${cat.label} · 桌號 1–6</h2>
               <table>
                 <thead><tr><th>桌號</th><th>組別</th><th>項目</th></tr></thead>
                 <tbody>${body}</tbody>
@@ -1701,12 +1704,12 @@
             </section>`;
         }).join("");
         const omitted = extra.length
-          ? `<p class="hint no-print">此活動現有 ${source.length} 組（系統預設 13 組）。分桌表只列桌號 1–12，電動組與手動組各 12 組。未列入：${extra.map(row => `桌號 ${row.teamNumber}（${escapeHtml(row.name)}）`).join("、")}。</p>`
-          : `<p class="hint no-print">電動組 12 桌、手動組 12 桌，按桌號由小至大，可直接列印給各組跟從。</p>`;
+          ? `<p class="hint no-print">此活動現有 ${source.length} 組。固定分桌每邊只列桌號 1–6。未列入固定桌：${extra.map(row => `${escapeHtml(row.name)}`).join("、")}。格鬥對陣見輪轉表。</p>`
+          : `<p class="hint no-print">手動組 6 桌、電動組 6 桌，兩邊都是桌號 1–6。</p>`;
         root.innerHTML = `
           <div class="roster-head">
             <h2 class="roster-event">${escapeHtml(state.eventName || "陀螺 Fun Day")}</h2>
-            <p class="hint">${escapeHtml(state.schoolName || "")} · 分桌次序（桌號 1–12）</p>
+            <p class="hint">${escapeHtml(state.schoolName || "")} · 共 12 桌：手動 1–6 + 電動 1–6，不是共用 1–12</p>
             ${omitted}
           </div>
           <div class="roster-grid">${blocks}</div>`;
