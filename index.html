@@ -373,8 +373,11 @@
     .roster-sheet table { background: white; }
     .roster-sheet th, .roster-sheet td { border: 1px solid #d5dfd9; }
     .roster-sheet .table-no { font-weight: 900; font-variant-numeric: tabular-nums; width: 4.5rem; }
+    .overall-board { margin-bottom: 16px; }
+    .rotation-picker { display: grid; gap: 4px; margin-bottom: 14px; }
+    .rotation-side { display: flex; align-items: center; gap: 10px; }
+    .rotation-side-label { min-width: 4.5rem; font-weight: 800; }
     .rotation-sheet tbody tr:nth-child(-n+3) { background: transparent; }
-    .rotation-sheet tr.table-start td { border-top: 2px solid #9eb5ab; }
 
     .settings-grid {
       display: grid;
@@ -595,8 +598,17 @@
       <div class="section-head">
         <div>
           <h2>即時排行榜</h2>
-          <p class="hint">揀一場賽事檢閱。成績會隨 Helper 操作同步更新。</p>
+          <p class="hint">上方是總排行榜：每組四項 F1 積分相加。下方可揀單一賽事檢閱。成績會隨 Helper 操作同步更新。</p>
         </div>
+      </div>
+      <div class="panel leaderboard-board overall-board" id="overallPanel">
+        <div class="section-head">
+          <div>
+            <h2 style="font-size:20px">總排行榜</h2>
+            <p class="hint">總分 = 該組四項 F1 積分相加：耐力電動 + 耐力手動 + 格鬥電動 + 格鬥手動。未有名次的一項計 0。</p>
+          </div>
+        </div>
+        <div class="table-wrap" id="overallTable"></div>
       </div>
       <div class="leaderboard-picks" id="leaderboardPicks">
         <button class="leaderboard-pick active" data-leaderboard="endurance-electric">耐力賽 · 電動組<small>總分 = F1 名次積分</small></button>
@@ -622,10 +634,11 @@
       <div class="section-head no-print">
         <div>
           <h2>對陣輪轉</h2>
-          <p class="hint">一張表對照每桌對陣：桌號、A組、B組、輪次。同一桌的各輪排在一起。手動組與電動組各自使用桌號 1–6。</p>
+          <p class="hint">先選本組的桌號。按下電動或手動的某一桌，只顯示該桌由目前輪次起的對陣。手動組與電動組各自使用桌號 1–6。</p>
         </div>
-        <button class="btn small primary" type="button" id="printRotationBtn">列印輪轉表</button>
+        <button class="btn small primary" type="button" id="printRotationBtn">列印此桌</button>
       </div>
+      <div class="panel no-print rotation-picker" id="rotationPicker"></div>
       <div class="panel roster-sheet rotation-sheet" id="rotationPrint"></div>
     </section>
 
@@ -745,6 +758,7 @@
       let lastVersion = "";
       let seenTally = null;
       let activeLeaderboard = "endurance-electric";
+      let selectedRotation = null;
       let battleTalliedAt = "";
       const pendingEndurance = new Map();
 
@@ -838,6 +852,7 @@
         eventId = null;
         lastVersion = "";
         seenTally = null;
+        selectedRotation = null;
         pendingEndurance.clear();
         state = defaultState();
         teamRows = [];
@@ -1353,7 +1368,53 @@
           </table>`;
       }
 
+      function f1ForTeam(rows, index) {
+        const row = rows.find(item => item.index === index);
+        return row && row.place ? row.points : 0;
+      }
+
+      function overallTeams({ live = true } = {}) {
+        return state.teams.map((name, index) => ({
+          index,
+          name,
+          tableNo: tableNumber(index),
+          enduranceElectric: f1ForTeam(enduranceBoardRows("electric", { live }), index),
+          enduranceManual: f1ForTeam(enduranceBoardRows("manual", { live }), index),
+          battleElectric: f1ForTeam(getStandings("electric"), index),
+          battleManual: f1ForTeam(getStandings("manual"), index)
+        }));
+      }
+
+      function renderOverall() {
+        const el = $("#overallTable");
+        if (!el) return;
+        const ranked = FunDayF1.overallTeamTotals(overallTeams());
+        if (!ranked.length) {
+          el.innerHTML = `<div class="empty">尚未有組別</div>`;
+          return;
+        }
+        el.innerHTML = `
+          <table>
+            <thead>
+              <tr><th>#</th><th>組別</th><th>耐力電動</th><th>耐力手動</th><th>格鬥電動</th><th>格鬥手動</th><th>總分</th></tr>
+            </thead>
+            <tbody>
+              ${ranked.map(row => `
+                <tr>
+                  <td>${row.order}</td>
+                  <td><strong>${escapeHtml(row.name)}</strong></td>
+                  <td>${row.enduranceElectric}</td>
+                  <td>${row.enduranceManual}</td>
+                  <td>${row.battleElectric}</td>
+                  <td>${row.battleManual}</td>
+                  <td class="points">${row.points}</td>
+                </tr>`).join("")}
+            </tbody>
+          </table>`;
+      }
+
       function renderLeaderboard() {
+        renderOverall();
         const board = currentLeaderboard();
         $$("#leaderboardPicks .leaderboard-pick").forEach(btn => {
           btn.classList.toggle("active", btn.dataset.leaderboard === board.id);
@@ -1632,46 +1693,50 @@
 
       function renderRotation() {
         const root = $("#rotationPrint");
+        const picker = $("#rotationPicker");
+        if (picker) {
+          picker.innerHTML = CATEGORIES.map(cat => `
+            <div class="rotation-side">
+              <span class="rotation-side-label">${cat.label}</span>
+              <div class="round-picker">
+                ${Array.from({ length: TABLES_PER_SIDE }, (_, i) => {
+                  const table = i + 1;
+                  const active = selectedRotation && selectedRotation.side === cat.id && selectedRotation.table === table;
+                  return `<button type="button" class="round-btn ${active ? "active" : ""}" data-rotation-side="${cat.id}" data-rotation-table="${table}">桌 ${table}</button>`;
+                }).join("")}
+              </div>
+            </div>`).join("");
+        }
         if (!root) return;
-        const sheets = CATEGORIES.map(cat => {
-          const sheet = FunDayRotation.rotationSheet(battleState(cat.id).schedule);
-          return { cat, sheet };
+        if (!selectedRotation) {
+          root.innerHTML = `<div class="empty">請選本組的桌號，只顯示該桌由目前輪次起的對陣。</div>`;
+          return;
+        }
+        const cat = CATEGORIES.find(item => item.id === selectedRotation.side) || CATEGORIES[0];
+        const battle = battleState(selectedRotation.side);
+        const sheet = FunDayRotation.rotationSheet(battle.schedule);
+        const fromRound = (Number(battle.activeRound) || 0) + 1;
+        const rows = FunDayRotation.upcomingForTable(sheet.rows, {
+          table: selectedRotation.table,
+          fromRound
         });
-        const rows = FunDayRotation.scanRows(sheets.map(({ cat, sheet }) => ({
-          side: cat.id,
-          label: cat.label,
-          rows: sheet.rows
-        })));
-        const byes = sheets.flatMap(({ cat, sheet }) => sheet.byes.map(bye => `${cat.label}第 ${bye.round} 輪 ${escapeHtml(teamLabel(bye.teamIndex))}`));
-        const overflow = sheets.reduce((sum, { sheet }) => sum + sheet.overflow.length, 0);
-        const notes = [
-          byes.length ? `輪空：${byes.join("、")}。` : "",
-          overflow ? `有 ${overflow} 場超出該邊 6 桌，沒有編成桌號 7 或以後。` : ""
-        ].filter(Boolean).join(" ");
         const body = rows.length
-          ? rows.map((row, index) => {
-              const previous = rows[index - 1];
-              const start = !previous || previous.side !== row.side || previous.table !== row.table;
-              return `
-                <tr class="${start ? "table-start" : ""}">
-                  <td class="table-no">${row.table}</td>
-                  <td><strong>${escapeHtml(teamLabel(row.teamAIndex))}</strong></td>
-                  <td><strong>${escapeHtml(teamLabel(row.teamBIndex))}</strong></td>
-                  <td>${row.round}</td>
-                  <td>${escapeHtml(row.sideLabel)}</td>
-                </tr>`;
-            }).join("")
-          : `<tr><td colspan="5">尚未建立賽程</td></tr>`;
+          ? rows.map(row => `
+              <tr>
+                <td>${row.round}</td>
+                <td><strong>${escapeHtml(teamLabel(row.teamAIndex))}</strong></td>
+                <td><strong>${escapeHtml(teamLabel(row.teamBIndex))}</strong></td>
+              </tr>`).join("")
+          : `<tr><td colspan="3">此桌沒有未進行的對陣。</td></tr>`;
         root.innerHTML = `
           <div class="roster-head">
-            <h2 class="roster-event">${escapeHtml(state.eventName || "陀螺 Fun Day")}</h2>
-            <p class="hint">${escapeHtml(state.schoolName || "")} · 每桌對陣。手動組與電動組各自桌號 1–6，同一桌的各輪排在一起。</p>
+            <h2 class="roster-event">${escapeHtml(state.eventName || "陀螺 Fun Day")} · ${cat.label} · 桌 ${selectedRotation.table}</h2>
+            <p class="hint">${escapeHtml(state.schoolName || "")} · 由第 ${fromRound} 輪起，只列此桌尚未進行的對陣。</p>
           </div>
           <table>
-            <thead><tr><th>桌號</th><th>A組</th><th>B組</th><th>輪次</th><th>邊</th></tr></thead>
+            <thead><tr><th>輪次</th><th>A組</th><th>B組</th></tr></thead>
             <tbody>${body}</tbody>
-          </table>
-          ${notes ? `<p class="hint">${notes}</p>` : ""}`;
+          </table>`;
       }
 
       function renderRoster() {
@@ -1753,6 +1818,7 @@
             ),
             battle: FunDayF1.combinePlacePoints(getStandings("electric"), getStandings("manual"))
           },
+          overall: FunDayF1.overallTeamTotals(overallTeams({ live: false })),
           battleMatches: {
             electric: state.battle.electric.matches,
             manual: state.battle.manual.matches
@@ -1780,6 +1846,15 @@
         if (leaderboardPick) {
           activeLeaderboard = leaderboardPick.dataset.leaderboard;
           renderLeaderboard();
+        }
+
+        const rotationButton = event.target.closest("[data-rotation-table]");
+        if (rotationButton) {
+          selectedRotation = {
+            side: rotationButton.dataset.rotationSide,
+            table: Number(rotationButton.dataset.rotationTable)
+          };
+          renderRotation();
         }
 
         const resetCategoryButton = event.target.closest("[data-reset-category]");
@@ -1866,6 +1941,7 @@
         eventId = null;
         lastVersion = "";
         seenTally = null;
+        selectedRotation = null;
         pendingEndurance.clear();
         state = defaultState();
         teamRows = [];
@@ -1886,8 +1962,9 @@
         });
         if (enduranceChanged) {
           renderEnduranceRanking();
-          if ($("#leaderboardView")?.classList.contains("active") && currentLeaderboard().kind === "endurance") {
-            renderLeaderboard();
+          if ($("#leaderboardView")?.classList.contains("active")) {
+            if (currentLeaderboard().kind === "endurance") renderLeaderboard();
+            else renderOverall();
           }
         }
 

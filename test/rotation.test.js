@@ -55,6 +55,18 @@ test("scan order keeps one table's pairings together, electric then manual", () 
   ]);
 });
 
+test("upcoming rotation is one table from the current round forward", () => {
+  const { upcomingForTable } = require("../lib/rotation");
+  const rows = [
+    { table: 1, round: 1, teamAIndex: 0, teamBIndex: 1 },
+    { table: 1, round: 3, teamAIndex: 2, teamBIndex: 3 },
+    { table: 2, round: 3, teamAIndex: 4, teamBIndex: 5 },
+    { table: 1, round: 2, teamAIndex: 6, teamBIndex: 7 }
+  ];
+  assert.deepEqual(upcomingForTable(rows, { table: 1, fromRound: 2 }).map((row) => row.round), [2, 3]);
+  assert.equal(upcomingForTable(rows, { table: 2, fromRound: 2 }).length, 1);
+});
+
 test("rotation keeps match numbers as table numbers even if listed out of order", () => {
   const sheet = rotationSheet([
     { matches: [{ a: 3, b: 1, n: 2 }, { a: 0, b: 2, n: 0 }], bye: -1 }
