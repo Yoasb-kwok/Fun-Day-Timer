@@ -373,6 +373,8 @@
     .roster-sheet table { background: white; }
     .roster-sheet th, .roster-sheet td { border: 1px solid #d5dfd9; }
     .roster-sheet .table-no { font-weight: 900; font-variant-numeric: tabular-nums; width: 4.5rem; }
+    .rotation-sheet tbody tr:nth-child(-n+3) { background: transparent; }
+    .rotation-sheet tr.table-start td { border-top: 2px solid #9eb5ab; }
 
     .settings-grid {
       display: grid;
@@ -502,7 +504,7 @@
       .panel { box-shadow: none; border-color: #bbb; }
       .battle-grid, .endurance-layout { grid-template-columns: 1fr; }
       .roster-grid { display: grid !important; grid-template-columns: 1fr 1fr !important; }
-      .roster-sheet th { position: static; background: white; }
+      .roster-sheet th, .rotation-sheet th { position: static; background: white; }
       .ranking { position: static; }
     }
   </style>
@@ -548,6 +550,7 @@
       <button class="tab" data-view="battle">單循環格鬥</button>
       <button class="tab" data-view="settings">隊伍設定</button>
       <button class="tab" data-view="leaderboard">排行榜</button>
+      <button class="tab" data-view="rotation">輪轉表</button>
       <button class="tab" data-view="roster">分桌表</button>
     </nav>
     <div class="actions">
@@ -563,7 +566,7 @@
       <div class="section-head">
         <div>
           <h2>耐力賽計時</h2>
-          <p class="hint">電動組與手動組分開計時、分開按總分排名。總分 = 最佳時間（秒，兩位小數），例如 01:23.45 即 83.45 分。可多次嘗試，只有更長時間才會更新該組紀錄。</p>
+          <p class="hint">電動組與手動組分開計時、分開排名。名次按最佳時間，時間較長較前；同分則桌號較小者在前。總分是該名次的 F1 積分：第1名 25、第2名 18、第3名 15、第4名 12、第5名 10、第6名 8、第7名 6、第8名 4、第9名 2、第10名 1，第11名及以後 0。可多次嘗試，只有更長時間才會更新紀錄。</p>
         </div>
         <div class="actions no-print">
           <a class="btn small" href="#endurance-electric">電動組</a>
@@ -577,7 +580,7 @@
       <div class="section-head">
         <div>
           <h2>單循環格鬥 · 三盤兩勝</h2>
-          <p class="hint">電動組與手動組分開對賽、分開總分。每場限時 2 分鐘；勝一場 3 分。可隨時按「結算總分」，不必等活動結束。</p>
+          <p class="hint">電動組與手動組分開對賽、分開排名。名次只計已完成的場次：勝場 → 盤差 → 得盤。總分是該名次的 F1 積分（第1名 25、第2名 18、第3名 15、第4名 12、第5名 10、第6名 8、第7名 6、第8名 4、第9名 2、第10名 1，第11名及以後 0），尚未出賽的組別沒有名次。可隨時按「結算總分」。</p>
         </div>
         <div class="actions no-print">
           <a class="btn small" href="#battle-electric">電動組</a>
@@ -596,16 +599,18 @@
         </div>
       </div>
       <div class="leaderboard-picks" id="leaderboardPicks">
-        <button class="leaderboard-pick active" data-leaderboard="endurance-electric">耐力賽 · 電動組<small>總分 = 最佳秒數</small></button>
-        <button class="leaderboard-pick" data-leaderboard="endurance-manual">耐力賽 · 手動組<small>總分 = 最佳秒數</small></button>
-        <button class="leaderboard-pick" data-leaderboard="battle-electric">格鬥賽 · 電動組<small>總分 = 勝場 × 3</small></button>
-        <button class="leaderboard-pick" data-leaderboard="battle-manual">格鬥賽 · 手動組<small>總分 = 勝場 × 3</small></button>
+        <button class="leaderboard-pick active" data-leaderboard="endurance-electric">耐力賽 · 電動組<small>總分 = F1 名次積分</small></button>
+        <button class="leaderboard-pick" data-leaderboard="endurance-manual">耐力賽 · 手動組<small>總分 = F1 名次積分</small></button>
+        <button class="leaderboard-pick" data-leaderboard="battle-electric">格鬥賽 · 電動組<small>總分 = F1 名次積分</small></button>
+        <button class="leaderboard-pick" data-leaderboard="battle-manual">格鬥賽 · 手動組<small>總分 = F1 名次積分</small></button>
+        <button class="leaderboard-pick" data-leaderboard="endurance-combined">耐力賽 · 綜合總分<small>電動第N + 手動第N</small></button>
+        <button class="leaderboard-pick" data-leaderboard="battle-combined">格鬥賽 · 綜合總分<small>電動第N + 手動第N</small></button>
       </div>
       <div class="panel leaderboard-board">
         <div class="section-head">
           <div>
             <h2 style="font-size:20px" id="leaderboardTitle">耐力賽 · 電動組</h2>
-            <p class="hint" id="leaderboardHint">總分 = 最佳時間（秒），越高越前</p>
+            <p class="hint" id="leaderboardHint">總分 = F1 名次積分。時間較長名次較前</p>
           </div>
           <button class="btn small primary no-print" type="button" id="tallyLeaderboardBtn" data-tally-battle="all" hidden>結算總分</button>
         </div>
@@ -613,11 +618,22 @@
       </div>
     </section>
 
+    <section class="view" id="rotationView">
+      <div class="section-head no-print">
+        <div>
+          <h2>對陣輪轉</h2>
+          <p class="hint">一張表對照每桌對陣：桌號、A組、B組、輪次。同一桌的各輪排在一起。手動組與電動組各自使用桌號 1–6。</p>
+        </div>
+        <button class="btn small primary" type="button" id="printRotationBtn">列印輪轉表</button>
+      </div>
+      <div class="panel roster-sheet rotation-sheet" id="rotationPrint"></div>
+    </section>
+
     <section class="view" id="rosterView">
       <div class="section-head no-print">
         <div>
           <h2>分桌表</h2>
-          <p class="hint">列出電動組 12 桌及手動組 12 桌，按桌號由小至大，方便列印給各組跟從。</p>
+          <p class="hint">現場共 12 桌：手動組 1–6、電動組 1–6。兩邊各自從 1 起計，不是共用 1–12。</p>
         </div>
         <button class="btn small primary" type="button" id="printRosterBtn">列印分桌表</button>
       </div>
@@ -677,6 +693,8 @@
   </main>
   <div class="toast" id="toast"></div>
 
+  <script src="lib/f1Points.js"></script>
+  <script src="lib/rotation.js"></script>
   <script>
     (() => {
       "use strict";
@@ -688,12 +706,15 @@
         { id: "electric", label: "電動組" },
         { id: "manual", label: "手動組" }
       ];
-      const ROSTER_TABLES = 12;
+      const TABLES_PER_SIDE = FunDayRotation.TABLES_PER_SIDE;
+      const F1_HINT = "總分 = F1 名次積分（第1名25、第2名18、第3名15、第4名12、第5名10、第6名8、第7名6、第8名4、第9名2、第10名1，第11名及以後0）";
       const LEADERBOARDS = [
-        { id: "endurance-electric", kind: "endurance", category: "electric", title: "耐力賽 · 電動組", hint: "總分 = 最佳時間（秒），越高越前；同分則桌號較小者在前" },
-        { id: "endurance-manual", kind: "endurance", category: "manual", title: "耐力賽 · 手動組", hint: "總分 = 最佳時間（秒），越高越前；同分則桌號較小者在前" },
-        { id: "battle-electric", kind: "battle", category: "electric", title: "格鬥賽 · 電動組", hint: "總分 = 勝場 × 3；同分：勝場 → 盤差 → 得盤" },
-        { id: "battle-manual", kind: "battle", category: "manual", title: "格鬥賽 · 手動組", hint: "總分 = 勝場 × 3；同分：勝場 → 盤差 → 得盤" }
+        { id: "endurance-electric", kind: "endurance", category: "electric", title: "耐力賽 · 電動組", hint: `${F1_HINT}。時間較長名次較前；同分則桌號較小者在前` },
+        { id: "endurance-manual", kind: "endurance", category: "manual", title: "耐力賽 · 手動組", hint: `${F1_HINT}。時間較長名次較前；同分則桌號較小者在前` },
+        { id: "battle-electric", kind: "battle", category: "electric", title: "格鬥賽 · 電動組", hint: `${F1_HINT}。名次：勝場 → 盤差 → 得盤；尚未出賽沒有名次` },
+        { id: "battle-manual", kind: "battle", category: "manual", title: "格鬥賽 · 手動組", hint: `${F1_HINT}。名次：勝場 → 盤差 → 得盤；尚未出賽沒有名次` },
+        { id: "endurance-combined", kind: "endurance-combined", title: "耐力賽 · 綜合總分", hint: "總分 = 電動第N名的 F1 積分 + 手動第N名的 F1 積分。未有名次的一側計 0，總分不再換算一次。" },
+        { id: "battle-combined", kind: "battle-combined", title: "格鬥賽 · 綜合總分", hint: "總分 = 電動第N名的 F1 積分 + 手動第N名的 F1 積分。未有名次的一側計 0，總分不再換算一次。" }
       ];
 
       const defaultState = () => ({
@@ -933,7 +954,7 @@
             if (!battle.schedule[row.roundNumber]) return;
             const a = teamIndex.get(row.teamAId);
             const b = teamIndex.get(row.teamBId);
-            battle.schedule[row.roundNumber].matches.push({ a, b });
+            battle.schedule[row.roundNumber].matches.push({ a, b, n: row.matchNumber });
             const key = `${id}-r${row.roundNumber}-m${row.matchNumber}`;
             battle.matches[key] = {
               id: row.id,
@@ -962,6 +983,7 @@
         const settingsFocused = document.activeElement?.matches?.("#eventName, #schoolName, [data-team-input]");
         if (!settingsFocused) renderSettings();
         renderLeaderboard();
+        renderRotation();
         renderRoster();
         setConnection("online", "已連線");
       }
@@ -1064,49 +1086,40 @@
         return Number(teamRows[index]?.team_number) || index + 1;
       }
 
-      // 耐力賽總分 = 最佳時間的秒數（兩位小數）。01:23.45 → 83.45。
-      function scoreFromMs(ms) {
-        return Math.round((ms || 0) / 10) / 100;
+      function formatPlacePoints(row) {
+        return row.place ? String(row.points) : "—";
       }
 
-      function formatScore(ms) {
-        const score = scoreFromMs(ms);
-        return ms > 0 && score > 0 ? score.toFixed(2) : "—";
-      }
-
-      function enduranceScore(item) {
-        return scoreFromMs(recordTime(item));
-      }
-
-      function enduranceBoardRows(category) {
-        return (state.endurance[category] || [])
-          .map((item, i) => ({
-            i,
-            tableNo: tableNumber(i),
-            name: state.teams[i] || `第 ${i + 1} 組`,
-            time: recordTime(item),
-            score: enduranceScore(item),
-            live: Boolean(item.running && currentElapsed(item) > (item.bestElapsed || 0))
-          }))
-          .sort((a, b) => b.score - a.score || a.tableNo - b.tableNo || a.i - b.i);
+      function enduranceBoardRows(category, { live = true } = {}) {
+        const rows = (state.endurance[category] || []).map((item, index) => ({
+          index,
+          tableNo: tableNumber(index),
+          name: state.teams[index] || `第 ${index + 1} 組`,
+          time: live ? recordTime(item) : (item.bestElapsed || 0),
+          live: Boolean(live && item.running && currentElapsed(item) > (item.bestElapsed || 0))
+        }));
+        return FunDayF1.rankEndurance(rows);
       }
 
       function rankingHtml(category) {
-        const ranked = enduranceBoardRows(category).filter(row => row.score > 0);
+        const ranked = enduranceBoardRows(category).filter(row => row.place);
         return ranked.length
-          ? ranked.map((row, rank) => `
+          ? ranked.map(row => `
               <div class="rank-row">
-                <span class="rank-num">${rank + 1}</span>
+                <span class="rank-num">${row.place}</span>
                 <span class="team-name">${escapeHtml(row.name)}${row.live ? " · 計時中" : ""}</span>
-                <span class="rank-score" title="最佳 ${formatTime(row.time)}">${formatScore(row.time)} 分</span>
+                <span class="rank-score" title="第 ${row.place} 名 · 最佳 ${formatTime(row.time)}">${row.points} 分</span>
               </div>`).join("")
           : `<div class="empty">尚未有計時紀錄</div>`;
       }
 
       function timerCardsHtml(category) {
+        const ranked = new Map(enduranceBoardRows(category, { live: false }).map(row => [row.index, row]));
         return state.endurance[category].map((item, i) => {
           const status = item.running ? ["live", "計時中"] : item.bestElapsed ? ["done", "已有紀錄"] : ["", "未開始"];
           const startLabel = item.bestElapsed || item.elapsed ? "再試" : "開始";
+          const row = ranked.get(i);
+          const standing = row?.place ? ` · 第 ${row.place} 名 · 總分 <strong>${row.points}</strong>` : "";
           return `
             <article class="timer-card ${item.running ? "running" : ""}">
               <div class="timer-top">
@@ -1116,7 +1129,7 @@
               <div class="timer-display" data-time="${category}-${i}">${formatTime(currentElapsed(item))}</div>
               <div class="best-time">
                 ${item.bestElapsed
-                  ? `<span>最佳 <strong>${formatTime(item.bestElapsed)}</strong> · 總分 <strong>${formatScore(item.bestElapsed)}</strong></span>
+                  ? `<span>最佳 <strong>${formatTime(item.bestElapsed)}</strong>${standing}</span>
                      <button class="clear-best" data-timer-action="clear-best" data-category="${category}" data-index="${i}">清除紀錄</button>`
                   : `<span>尚未有紀錄</span>`}
               </div>
@@ -1140,7 +1153,7 @@
                 <div class="section-head">
                   <div>
                     <h2 style="font-size:20px">${cat.label}</h2>
-                    <p class="hint">按總分排名（總分 = 最佳秒數）</p>
+                    <p class="hint">名次按最佳時間，總分 = F1 名次積分</p>
                   </div>
                 </div>
                 <div class="timer-grid">${timerCardsHtml(cat.id)}</div>
@@ -1149,7 +1162,7 @@
                 <div class="section-head">
                   <div>
                     <h2 style="font-size:20px">即時排名</h2>
-                    <p class="hint">${cat.label} · 總分越高越前</p>
+                    <p class="hint">${cat.label} · 總分 = F1 名次積分</p>
                   </div>
                   <div class="actions no-print">
                     <button class="btn small" data-reset-category="${cat.id}">重設${cat.label}</button>
@@ -1254,8 +1267,15 @@
 
       function getStandings(category) {
         const battle = battleState(category);
-        const rows = state.teams.map((name, i) => ({
-          i, name, played: 0, wins: 0, losses: 0, gamesFor: 0, gamesAgainst: 0, points: 0
+        const rows = state.teams.map((name, index) => ({
+          index,
+          name,
+          tableNo: tableNumber(index),
+          played: 0,
+          wins: 0,
+          losses: 0,
+          gamesFor: 0,
+          gamesAgainst: 0
         }));
         battle.schedule.forEach((round, r) => round.matches.forEach((match, m) => {
           const data = matchData(matchId(category, r, m));
@@ -1265,28 +1285,22 @@
           a.gamesFor += data.aScore; a.gamesAgainst += data.bScore;
           b.gamesFor += data.bScore; b.gamesAgainst += data.aScore;
           if (data.aScore > data.bScore) {
-            a.wins++; a.points += 3; b.losses++;
+            a.wins++; b.losses++;
           } else {
-            b.wins++; b.points += 3; a.losses++;
+            b.wins++; a.losses++;
           }
         }));
-        return rows.sort((a, b) =>
-          b.points - a.points ||
-          b.wins - a.wins ||
-          (b.gamesFor - b.gamesAgainst) - (a.gamesFor - a.gamesAgainst) ||
-          b.gamesFor - a.gamesFor ||
-          a.i - b.i
-        );
+        return FunDayF1.rankBattle(rows);
       }
 
       function standingsHtml(category) {
-        return getStandings(category).map((row, rank) => `
+        return getStandings(category).map(row => `
           <tr>
-            <td>${rank + 1}</td>
+            <td>${row.place || "—"}</td>
             <td><strong>${escapeHtml(row.name)}</strong></td>
             <td>${row.played}</td><td>${row.wins}</td><td>${row.losses}</td>
             <td>${row.gamesFor - row.gamesAgainst > 0 ? "+" : ""}${row.gamesFor - row.gamesAgainst}</td>
-            <td class="points">${row.points}</td>
+            <td class="points">${formatPlacePoints(row)}</td>
           </tr>`).join("");
       }
 
@@ -1316,14 +1330,14 @@
               <tr><th>#</th><th>組別</th><th>桌號</th><th>總分</th><th>最佳時間</th><th>狀態</th></tr>
             </thead>
             <tbody>
-              ${ranked.map((row, rank) => `
+              ${ranked.map(row => `
                 <tr>
-                  <td>${rank + 1}</td>
+                  <td>${row.place || "—"}</td>
                   <td><strong>${escapeHtml(row.name)}</strong></td>
                   <td>${row.tableNo}</td>
-                  <td class="points">${formatScore(row.time)}</td>
+                  <td class="points">${formatPlacePoints(row)}</td>
                   <td class="rank-time">${row.time ? formatTime(row.time) : "—"}</td>
-                  <td>${row.live ? "計時中" : row.time ? "已有紀錄" : "未開始"}</td>
+                  <td>${row.live ? "計時中" : row.place ? "已有紀錄" : "未開始"}</td>
                 </tr>`).join("")}
             </tbody>
           </table>`;
@@ -1358,7 +1372,40 @@
         }
         table.innerHTML = board.kind === "endurance"
           ? enduranceLeaderboardHtml(board.category)
-          : battleLeaderboardHtml(board.category);
+          : board.kind === "endurance-combined"
+            ? combinedLeaderboardHtml("endurance")
+            : board.kind === "battle-combined"
+              ? combinedLeaderboardHtml("battle")
+              : battleLeaderboardHtml(board.category);
+      }
+
+      function formatPlaceLabel(place) {
+        return place ? `第${place}名` : "—";
+      }
+
+      function combinedLeaderboardHtml(kind) {
+        const electric = kind === "endurance" ? enduranceBoardRows("electric") : getStandings("electric");
+        const manual = kind === "endurance" ? enduranceBoardRows("manual") : getStandings("manual");
+        const ranked = FunDayF1.combinePlacePoints(electric, manual);
+        if (!ranked.length) return `<div class="empty">尚未有組別</div>`;
+        return `
+          <table>
+            <thead>
+              <tr><th>#</th><th>組別</th><th>電動名次</th><th>電動積分</th><th>手動名次</th><th>手動積分</th><th>總分</th></tr>
+            </thead>
+            <tbody>
+              ${ranked.map(row => `
+                <tr>
+                  <td>${row.order}</td>
+                  <td><strong>${escapeHtml(row.name)}</strong></td>
+                  <td>${formatPlaceLabel(row.electricPlace)}</td>
+                  <td>${row.electricPlace ? row.electricPoints : "—"}</td>
+                  <td>${formatPlaceLabel(row.manualPlace)}</td>
+                  <td>${row.manualPlace ? row.manualPoints : "—"}</td>
+                  <td class="points">${row.points}</td>
+                </tr>`).join("")}
+            </tbody>
+          </table>`;
       }
 
       function matchesHtml(category) {
@@ -1434,7 +1481,7 @@
                   <div class="section-head">
                     <div>
                       <h2 style="font-size:20px">總分榜</h2>
-                      <p class="hint">${cat.label} · 總分 = 勝場 × 3${battleTalliedAt ? ` · 上次結算 ${battleTalliedAt}` : " · 可隨時結算"}</p>
+                      <p class="hint">${cat.label} · ${F1_HINT}${battleTalliedAt ? ` · 上次結算 ${battleTalliedAt}` : " · 可隨時結算"}</p>
                     </div>
                     <button class="btn small primary no-print" type="button" data-tally-battle="all">結算總分</button>
                   </div>
@@ -1574,6 +1621,7 @@
         if (view === "battle") renderBattle();
         if (view === "settings") renderSettings();
         if (view === "leaderboard") renderLeaderboard();
+        if (view === "rotation") renderRotation();
         if (view === "roster") renderRoster();
       }
 
@@ -1582,21 +1630,70 @@
         return state.teams.map((name, i) => ({ teamNumber: i + 1, name }));
       }
 
+      function teamLabel(index) {
+        if (!Number.isInteger(index) || index < 0) return "—";
+        return state.teams[index] || `第 ${index + 1} 組`;
+      }
+
+      function renderRotation() {
+        const root = $("#rotationPrint");
+        if (!root) return;
+        const sheets = CATEGORIES.map(cat => {
+          const sheet = FunDayRotation.rotationSheet(battleState(cat.id).schedule);
+          return { cat, sheet };
+        });
+        const rows = FunDayRotation.scanRows(sheets.map(({ cat, sheet }) => ({
+          side: cat.id,
+          label: cat.label,
+          rows: sheet.rows
+        })));
+        const byes = sheets.flatMap(({ cat, sheet }) => sheet.byes.map(bye => `${cat.label}第 ${bye.round} 輪 ${escapeHtml(teamLabel(bye.teamIndex))}`));
+        const overflow = sheets.reduce((sum, { sheet }) => sum + sheet.overflow.length, 0);
+        const notes = [
+          byes.length ? `輪空：${byes.join("、")}。` : "",
+          overflow ? `有 ${overflow} 場超出該邊 6 桌，沒有編成桌號 7 或以後。` : ""
+        ].filter(Boolean).join(" ");
+        const body = rows.length
+          ? rows.map((row, index) => {
+              const previous = rows[index - 1];
+              const start = !previous || previous.side !== row.side || previous.table !== row.table;
+              return `
+                <tr class="${start ? "table-start" : ""}">
+                  <td class="table-no">${row.table}</td>
+                  <td><strong>${escapeHtml(teamLabel(row.teamAIndex))}</strong></td>
+                  <td><strong>${escapeHtml(teamLabel(row.teamBIndex))}</strong></td>
+                  <td>${row.round}</td>
+                  <td>${escapeHtml(row.sideLabel)}</td>
+                </tr>`;
+            }).join("")
+          : `<tr><td colspan="5">尚未建立賽程</td></tr>`;
+        root.innerHTML = `
+          <div class="roster-head">
+            <h2 class="roster-event">${escapeHtml(state.eventName || "陀螺 Fun Day")}</h2>
+            <p class="hint">${escapeHtml(state.schoolName || "")} · 每桌對陣。手動組與電動組各自桌號 1–6，同一桌的各輪排在一起。</p>
+          </div>
+          <table>
+            <thead><tr><th>桌號</th><th>A組</th><th>B組</th><th>輪次</th><th>邊</th></tr></thead>
+            <tbody>${body}</tbody>
+          </table>
+          ${notes ? `<p class="hint">${notes}</p>` : ""}`;
+      }
+
       function renderRoster() {
         const root = $("#rosterPrint");
         if (!root) return;
         const source = rosterSource();
         const byNumber = new Map(source.map(row => [row.teamNumber, row.name]));
-        const extra = source.filter(row => row.teamNumber > ROSTER_TABLES);
+        const extra = source.filter(row => row.teamNumber > TABLES_PER_SIDE);
         const blocks = CATEGORIES.map(cat => {
-          const body = Array.from({ length: ROSTER_TABLES }, (_, i) => {
+          const body = Array.from({ length: TABLES_PER_SIDE }, (_, i) => {
             const tableNo = i + 1;
             const name = byNumber.get(tableNo) || `第 ${tableNo} 組`;
             return `<tr><td class="table-no">${tableNo}</td><td><strong>${escapeHtml(name)}</strong></td><td>${cat.label}</td></tr>`;
           }).join("");
           return `
             <section class="roster-block">
-              <h2>${cat.label}</h2>
+              <h2>${cat.label} · 桌號 1–6</h2>
               <table>
                 <thead><tr><th>桌號</th><th>組別</th><th>項目</th></tr></thead>
                 <tbody>${body}</tbody>
@@ -1604,15 +1701,35 @@
             </section>`;
         }).join("");
         const omitted = extra.length
-          ? `<p class="hint no-print">此活動現有 ${source.length} 組（系統預設 13 組）。分桌表只列桌號 1–12，電動組與手動組各 12 組。未列入：${extra.map(row => `桌號 ${row.teamNumber}（${escapeHtml(row.name)}）`).join("、")}。</p>`
-          : `<p class="hint no-print">電動組 12 桌、手動組 12 桌，按桌號由小至大，可直接列印給各組跟從。</p>`;
+          ? `<p class="hint no-print">此活動現有 ${source.length} 組。固定分桌每邊只列桌號 1–6。未列入固定桌：${extra.map(row => `${escapeHtml(row.name)}`).join("、")}。格鬥對陣見輪轉表。</p>`
+          : `<p class="hint no-print">手動組 6 桌、電動組 6 桌，兩邊都是桌號 1–6。</p>`;
         root.innerHTML = `
           <div class="roster-head">
             <h2 class="roster-event">${escapeHtml(state.eventName || "陀螺 Fun Day")}</h2>
-            <p class="hint">${escapeHtml(state.schoolName || "")} · 分桌次序（桌號 1–12）</p>
+            <p class="hint">${escapeHtml(state.schoolName || "")} · 共 12 桌：手動 1–6 + 電動 1–6，不是共用 1–12</p>
             ${omitted}
           </div>
           <div class="roster-grid">${blocks}</div>`;
+      }
+
+      function enduranceExport(category) {
+        const rows = state.endurance[category].map((item, index) => ({
+          index,
+          tableNo: tableNumber(index),
+          name: state.enduranceNames[category][index],
+          time: item.bestElapsed || 0,
+          lastAttempt: Math.round(currentElapsed(item)),
+          completed: Boolean(item.done || item.bestElapsed > 0)
+        }));
+        return FunDayF1.rankEndurance(rows).map(row => ({
+          team: row.name,
+          table: row.tableNo,
+          place: row.place,
+          points: row.place ? row.points : 0,
+          milliseconds: Math.round(row.time || 0),
+          lastAttempt: row.lastAttempt,
+          completed: row.completed
+        }));
       }
 
       function exportData() {
@@ -1621,13 +1738,25 @@
           event: state.eventName,
           school: state.schoolName,
           teams: state.teams,
+          scoring: {
+            system: "f1-position-points",
+            byPlace: FunDayF1.F1_POINTS.slice(),
+            place11AndAfter: 0
+          },
           endurance: {
-            electric: state.endurance.electric.map((x, i) => ({ team: state.enduranceNames.electric[i], table: tableNumber(i), score: scoreFromMs(x.bestElapsed || 0), milliseconds: Math.round(x.bestElapsed || 0), lastAttempt: Math.round(currentElapsed(x)), completed: x.done || x.bestElapsed > 0 })),
-            manual: state.endurance.manual.map((x, i) => ({ team: state.enduranceNames.manual[i], table: tableNumber(i), score: scoreFromMs(x.bestElapsed || 0), milliseconds: Math.round(x.bestElapsed || 0), lastAttempt: Math.round(currentElapsed(x)), completed: x.done || x.bestElapsed > 0 }))
+            electric: enduranceExport("electric"),
+            manual: enduranceExport("manual")
           },
           standings: {
             electric: getStandings("electric"),
             manual: getStandings("manual")
+          },
+          combined: {
+            endurance: FunDayF1.combinePlacePoints(
+              enduranceBoardRows("electric", { live: false }),
+              enduranceBoardRows("manual", { live: false })
+            ),
+            battle: FunDayF1.combinePlacePoints(getStandings("electric"), getStandings("manual"))
           },
           battleMatches: {
             electric: state.battle.electric.matches,
@@ -1724,6 +1853,10 @@
       $("#printBtn").addEventListener("click", () => window.print());
       $("#printRosterBtn").addEventListener("click", () => {
         renderRoster();
+        window.print();
+      });
+      $("#printRotationBtn").addEventListener("click", () => {
+        renderRotation();
         window.print();
       });
       $("#loginForm").addEventListener("submit", event => {
