@@ -41,7 +41,11 @@ test("page no longer loads Supabase and keeps the Traditional Chinese labels", (
   assert.ok(html.includes('"/api/session"'));
   assert.ok(html.includes("FunDayRotation.TABLES_PER_SIDE"));
   assert.ok(html.includes("不是共用 1–12"));
-  assert.ok(html.includes("同一桌的各輪排在一起"));
+  assert.ok(html.includes("data-rotation-table"));
+  assert.ok(html.includes("FunDayRotation.upcomingForTable"));
+  assert.ok(html.includes("請選本組的桌號，只顯示該桌由目前輪次起的對陣。"));
+  assert.ok(html.includes("<th>輪次</th><th>A組</th><th>B組</th>"));
+  assert.equal(html.includes("同一桌的各輪排在一起"), false);
   assert.equal(html.includes("ROSTER_TABLES = 12"), false);
   assert.equal(html.includes("各 12 組"), false);
   assert.equal(html.includes("桌號 1–12"), false);
@@ -50,9 +54,11 @@ test("page no longer loads Supabase and keeps the Traditional Chinese labels", (
   assert.ok(html.includes("FunDayF1.rankEndurance"));
   assert.ok(html.includes("FunDayF1.rankBattle"));
   assert.ok(html.includes("FunDayF1.combinePlacePoints"));
+  assert.ok(html.includes("總排行榜"));
+  assert.ok(html.includes("該組四項 F1 積分相加：耐力電動 + 耐力手動 + 格鬥電動 + 格鬥手動"));
+  assert.ok(html.includes("FunDayF1.overallTeamTotals"));
   assert.ok(html.includes("FunDayRotation.rotationSheet"));
-  assert.ok(html.includes("<th>桌號</th><th>A組</th><th>B組</th><th>輪次</th><th>邊</th>"));
-  assert.ok(html.includes("FunDayRotation.scanRows"));
+  assert.equal(html.includes("<th>桌號</th><th>A組</th><th>B組</th><th>輪次</th><th>邊</th>"), false);
   assert.ok(html.includes("電動第N + 手動第N"));
   assert.ok(html.includes("第1名 25、第2名 18、第3名 15、第4名 12、第5名 10、第6名 8、第7名 6、第8名 4、第9名 2、第10名 1，第11名及以後 0"));
   assert.equal(html.includes("83.45"), false);
