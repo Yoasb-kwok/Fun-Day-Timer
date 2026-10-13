@@ -244,7 +244,7 @@
     .rank-list { display: grid; gap: 8px; margin-top: 12px; }
     .rank-row {
       display: grid;
-      grid-template-columns: 32px 1fr auto;
+      grid-template-columns: 32px auto minmax(0, 1fr) auto;
       gap: 9px;
       align-items: center;
       padding: 10px;
@@ -256,6 +256,7 @@
     .rank-row:nth-child(3) { background: #f5ded0; }
     .rank-num { font-weight: 900; text-align: center; }
     .rank-time, .rank-score { font-weight: 850; font-variant-numeric: tabular-nums; }
+    .rank-list .rank-time { white-space: nowrap; }
     .rank-score { font-weight: 900; color: var(--green); }
 
     .battle-grid {
@@ -1122,8 +1123,9 @@
           ? ranked.map(row => `
               <div class="rank-row">
                 <span class="rank-num">${row.place}</span>
+                <span class="rank-time">${formatTime(row.time)}</span>
                 <span class="team-name">${escapeHtml(row.name)}${row.live ? " · 計時中" : ""}</span>
-                <span class="rank-score" title="第 ${row.place} 名 · 最佳 ${formatTime(row.time)}">${row.points} 分</span>
+                <span class="rank-score">${row.points} 分</span>
               </div>`).join("")
           : `<div class="empty">尚未有計時紀錄</div>`;
       }
@@ -1177,7 +1179,7 @@
                 <div class="section-head">
                   <div>
                     <h2 style="font-size:20px">即時排名</h2>
-                    <p class="hint">${cat.label} · 總分 = F1 名次積分</p>
+                    <p class="hint">${cat.label} · 名次旁是時間 · 總分 = F1 名次積分</p>
                   </div>
                   <div class="actions no-print">
                     <button class="btn small" data-reset-category="${cat.id}">重設${cat.label}</button>

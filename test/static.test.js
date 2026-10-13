@@ -61,6 +61,10 @@ test("page no longer loads Supabase and keeps the Traditional Chinese labels", (
   assert.equal(html.includes("<th>桌號</th><th>A組</th><th>B組</th><th>輪次</th><th>邊</th>"), false);
   assert.ok(html.includes("電動第N + 手動第N"));
   assert.ok(html.includes("第1名 25、第2名 18、第3名 15、第4名 12、第5名 10、第6名 8、第7名 6、第8名 4、第9名 2、第10名 1，第11名及以後 0"));
+  assert.ok(html.includes('<span class="rank-num">${row.place}</span>'));
+  assert.ok(html.includes('<span class="rank-time">${formatTime(row.time)}</span>'));
+  assert.ok(html.includes("${row.points} 分"));
+  assert.ok(html.includes("名次旁是時間"));
   assert.equal(html.includes("83.45"), false);
   assert.equal(html.includes("勝場 × 3"), false);
   assert.equal(html.includes("最佳秒數"), false);
