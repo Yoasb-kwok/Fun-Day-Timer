@@ -1,3 +1,6 @@
+-- Legacy Supabase schema. The live app no longer uses Supabase.
+-- Runtime tables are created from db/schema.sql by the Vercel API on first request.
+--
 -- Hagen Score realtime database
 -- Run this entire file in Supabase Dashboard > SQL Editor.
 

@@ -1,0 +1,15 @@
+{
+  "name": "fun-day-timer",
+  "private": true,
+  "description": "陀螺 Fun Day scoreboard. Vercel static page plus serverless API and Postgres.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test --test-concurrency=1 test/*.test.js"
+  },
+  "dependencies": {
+    "pg": "^8.16.3"
+  }
+}

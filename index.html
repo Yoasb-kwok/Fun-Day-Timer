@@ -590,7 +590,7 @@
       <div class="section-head">
         <div>
           <h2>即時排行榜</h2>
-          <p class="hint">揀一場賽事檢閱。成績會隨 Helper 操作即時更新。</p>
+          <p class="hint">揀一場賽事檢閱。成績會隨 Helper 操作同步更新。</p>
         </div>
       </div>
       <div class="leaderboard-picks" id="leaderboardPicks">
@@ -663,7 +663,7 @@
           <div class="panel">
             <h2 style="font-size:20px;margin-bottom:8px">現場使用提示</h2>
             <p class="hint" style="line-height:1.7">
-              所有 Helper 的操作會經 Supabase 即時同步。計時使用伺服器時間，
+              所有 Helper 的操作約每 1.5 秒同步。計時使用伺服器時間，
               即使重新整理或轉用另一部裝置，正在進行的計時亦會繼續。
             </p>
           </div>
@@ -671,19 +671,17 @@
       </div>
     </section>
 
-    <div class="footer-note">Supabase 多人即時同步 · 活動資料受密碼保護</div>
+    <div class="footer-note">伺服器多人同步 · 活動資料受密碼保護</div>
   </main>
   <div class="toast" id="toast"></div>
 
-  <script src="./supabase-config.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script>
     (() => {
       "use strict";
 
       const TEAM_COUNT = 13;
       const MATCH_LIMIT = 120000;
-      const CONFIG = window.SUPABASE_CONFIG || {};
+      const POLL_MS = 1500;
       const CATEGORIES = [
         { id: "electric", label: "電動組" },
         { id: "manual", label: "手動組" }
@@ -715,13 +713,14 @@
       });
 
       let state = defaultState();
-      let db = null;
       let eventId = null;
       let teamRows = [];
-      let realtimeChannel = null;
-      let reloadTimer = null;
+      let pollTimer = null;
       let toastTimer;
       let loadSeq = 0;
+      let inflight = 0;
+      let lastVersion = "";
+      let seenTally = null;
       let activeLeaderboard = "endurance-electric";
       let battleTalliedAt = "";
       const pendingEndurance = new Map();
@@ -749,18 +748,79 @@
 
       function friendlyError(error) {
         const message = error?.message || String(error);
-        if (message.includes("Invalid login credentials")) return "登入資料不正確";
         if (message.includes("活動代碼或 Helper 密碼")) return "活動代碼或 Helper 密碼不正確";
         if (message.includes("duplicate key")) return "此活動代碼已有人使用";
         if (message.includes("Failed to fetch")) return "未能連接伺服器，請檢查網絡";
+        if (message.includes("DATABASE_URL")) return "伺服器尚未設定資料庫連線（DATABASE_URL）";
         return message;
       }
 
-      async function ensureAnonymousSession() {
-        const { data } = await db.auth.getSession();
-        if (data.session) return;
-        const { error } = await db.auth.signInAnonymously();
-        if (error) throw error;
+      async function api(path, options = {}) {
+        let response;
+        try {
+          response = await fetch(path, {
+            method: options.method || "GET",
+            credentials: "same-origin",
+            headers: options.body ? { "Content-Type": "application/json" } : undefined,
+            body: options.body ? JSON.stringify(options.body) : undefined
+          });
+        } catch (error) {
+          const wrapped = new Error("Failed to fetch");
+          wrapped.cause = error;
+          throw wrapped;
+        }
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const error = new Error(data.error || `請求失敗 (${response.status})`);
+          error.status = response.status;
+          throw error;
+        }
+        return data;
+      }
+
+      async function mutate(path, body) {
+        inflight += 1;
+        const seq = ++loadSeq;
+        try {
+          const data = await api(path, { method: "POST", body });
+          if (data && data.event && seq === loadSeq) applySnapshot(data);
+          return data;
+        } finally {
+          inflight -= 1;
+        }
+      }
+
+      function startPolling() {
+        if (pollTimer) return;
+        pollTimer = setInterval(() => {
+          if (!eventId || inflight) return;
+          loadEventData(true).catch(error => {
+            if (error.status === 401 || error.status === 404) {
+              forceLogout();
+              return;
+            }
+            setConnection("offline", "同步失敗");
+          });
+        }, POLL_MS);
+      }
+
+      function stopPolling() {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+
+      function forceLogout() {
+        stopPolling();
+        loadSeq += 1;
+        eventId = null;
+        lastVersion = "";
+        seenTally = null;
+        pendingEndurance.clear();
+        state = defaultState();
+        teamRows = [];
+        $("#loginOverlay").classList.remove("hidden");
+        setConnection("offline", "未連線");
+        api("/api/logout", { method: "POST", body: {} }).catch(() => {});
       }
 
       function parseTimeMs(value) {
@@ -771,11 +831,11 @@
       }
 
       function normalizeEndurance(row, previous) {
-        const elapsed = Number(row.elapsed_ms || 0);
-        const bestElapsed = Number(row.best_elapsed_ms || 0);
+        const elapsed = Number(row.elapsedMs || 0);
+        const bestElapsed = Number(row.bestElapsedMs || 0);
         const pending = pendingEndurance.get(row.id);
         let running = row.status === "running";
-        let startedAt = parseTimeMs(row.started_at);
+        let startedAt = parseTimeMs(row.startedAt);
         let done = row.status === "done";
 
         if (pending?.action === "start") {
@@ -791,7 +851,7 @@
 
         return {
           id: row.id,
-          teamId: row.battle_team_id,
+          teamId: row.teamId,
           position: row.position,
           elapsed,
           bestElapsed: Math.max(bestElapsed, row.status === "done" ? elapsed : 0),
@@ -803,7 +863,7 @@
 
       function chooseEnduranceRow(rows, team) {
         const candidates = rows.filter(row =>
-          row.battle_team_id === team.id || Number(row.position) === team.team_number - 1
+          row.teamId === team.id || Number(row.position) === team.team_number - 1
         );
         if (!candidates.length) return null;
         return candidates.slice().sort((a, b) => {
@@ -813,36 +873,32 @@
           const runA = a.status === "running" ? 1 : 0;
           const runB = b.status === "running" ? 1 : 0;
           if (runA !== runB) return runB - runA;
-          const linkedA = a.battle_team_id ? 1 : 0;
-          const linkedB = b.battle_team_id ? 1 : 0;
+          const linkedA = a.teamId ? 1 : 0;
+          const linkedB = b.teamId ? 1 : 0;
           if (linkedA !== linkedB) return linkedB - linkedA;
-          return Number(b.best_elapsed_ms || 0) - Number(a.best_elapsed_ms || 0)
-            || String(b.updated_at || "").localeCompare(String(a.updated_at || ""))
+          return Number(b.bestElapsedMs || 0) - Number(a.bestElapsedMs || 0)
+            || String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""))
             || String(a.id).localeCompare(String(b.id));
         })[0];
       }
 
-      async function loadEventData(silent = false) {
-        if (!eventId) return;
-        const seq = ++loadSeq;
-        if (!silent) setConnection("syncing", "同步中");
-        const [eventResult, enduranceResult, teamsResult, matchesResult] = await Promise.all([
-          db.from("events").select("*").eq("id", eventId).single(),
-          db.from("endurance_entries").select("*").eq("event_id", eventId).eq("archived", false).order("position"),
-          db.from("battle_teams").select("*").eq("event_id", eventId).order("team_number"),
-          db.from("battle_matches").select("*").eq("event_id", eventId).order("round_number").order("match_number")
-        ]);
-        if (seq !== loadSeq) return;
-        const error = eventResult.error || enduranceResult.error || teamsResult.error || matchesResult.error;
-        if (error) throw error;
+      function applySnapshot(data, { announceTally = false } = {}) {
+        const event = data.event;
+        eventId = event.id;
+        const tallyIso = event.battleTalliedAt || "";
+        const hadSnapshot = Boolean(lastVersion);
+        if (announceTally && hadSnapshot && tallyIso && tallyIso !== seenTally) toast("格鬥總分已結算");
+        seenTally = tallyIso || null;
+        battleTalliedAt = tallyIso
+          ? new Date(tallyIso).toLocaleTimeString("zh-HK", { hour: "2-digit", minute: "2-digit", hour12: false })
+          : "";
 
-        const event = eventResult.data;
-        const enduranceRows = enduranceResult.data || [];
-        teamRows = teamsResult.data || [];
         state.eventName = event.name;
-        state.schoolName = event.school_name;
+        state.schoolName = event.schoolName;
+        teamRows = (data.teams || []).map(row => ({ id: row.id, team_number: row.teamNumber, name: row.name }));
         state.teams = teamRows.map(row => row.name);
 
+        const enduranceRows = data.endurance || [];
         ["electric", "manual"].forEach(category => {
           const rows = enduranceRows.filter(row => row.category === category);
           const previousById = new Map((state.endurance[category] || []).filter(item => item.id).map(item => [item.id, item]));
@@ -856,34 +912,37 @@
           state.endurance[category] = orderedRows.map(row => normalizeEndurance(row, previousById.get(row.id)));
         });
 
-        const matchRows = matchesResult.data || [];
+        const matchRows = data.matches || [];
         const teamIndex = new Map(teamRows.map((row, i) => [row.id, i]));
         CATEGORIES.forEach(({ id }) => {
           const rows = matchRows.filter(row => (row.category || "electric") === id);
           const battle = state.battle[id];
+          const previousMatches = battle.matches || {};
           const roundCount = id === "electric"
-            ? Number(event.electric_round_count ?? event.round_count ?? 9)
-            : Number(event.manual_round_count ?? event.round_count ?? 9);
+            ? Number(event.electricRoundCount ?? event.roundCount ?? 9)
+            : Number(event.manualRoundCount ?? event.roundCount ?? 9);
           const activeRound = id === "electric"
-            ? Number(event.electric_active_round ?? event.active_round ?? 0)
-            : Number(event.manual_active_round ?? 0);
+            ? Number(event.electricActiveRound ?? event.activeRound ?? 0)
+            : Number(event.manualActiveRound ?? 0);
           battle.roundCount = roundCount;
           battle.schedule = Array.from({ length: roundCount }, () => ({ matches: [], bye: null }));
           battle.matches = {};
           rows.forEach(row => {
-            if (!battle.schedule[row.round_number]) return;
-            const a = teamIndex.get(row.team_a_id);
-            const b = teamIndex.get(row.team_b_id);
-            battle.schedule[row.round_number].matches.push({ a, b });
-            battle.matches[`${id}-r${row.round_number}-m${row.match_number}`] = {
+            if (!battle.schedule[row.roundNumber]) return;
+            const a = teamIndex.get(row.teamAId);
+            const b = teamIndex.get(row.teamBId);
+            battle.schedule[row.roundNumber].matches.push({ a, b });
+            const key = `${id}-r${row.roundNumber}-m${row.matchNumber}`;
+            battle.matches[key] = {
               id: row.id,
-              aScore: row.a_score,
-              bScore: row.b_score,
+              aScore: row.aScore,
+              bScore: row.bScore,
               complete: row.complete,
-              timerElapsed: Number(row.timer_elapsed_ms || 0),
-              timerStartedAt: row.timer_started_at,
-              timerRunning: row.timer_running,
-              updatedAt: row.updated_at
+              timerElapsed: Number(row.timerElapsedMs || 0),
+              timerStartedAt: row.timerStartedAt,
+              timerRunning: row.timerRunning,
+              updatedAt: row.updatedAtToken,
+              timeAlerted: Boolean(previousMatches[key]?.timeAlerted)
             };
           });
           battle.schedule.forEach(round => {
@@ -894,49 +953,28 @@
           battle.activeRound = Math.min(activeRound, Math.max(0, battle.schedule.length - 1));
         });
 
+        lastVersion = data.version || "";
         renderHeader();
         renderTimers();
         renderBattle();
-        renderSettings();
+        const settingsFocused = document.activeElement?.matches?.("#eventName, #schoolName, [data-team-input]");
+        if (!settingsFocused) renderSettings();
         renderLeaderboard();
         renderRoster();
-        setConnection("online", "已即時連線");
+        setConnection("online", "已連線");
       }
 
-      function queueReload() {
-        clearTimeout(reloadTimer);
-        reloadTimer = setTimeout(() => {
-          loadEventData(true).catch(error => {
-            setConnection("offline", "同步失敗");
-            toast(friendlyError(error));
-          });
-        }, 100);
-      }
-
-      function subscribeToEvent() {
-        if (realtimeChannel) db.removeChannel(realtimeChannel);
-        realtimeChannel = db.channel(`event-${eventId}`)
-          .on("postgres_changes", { event: "*", schema: "public", table: "events", filter: `id=eq.${eventId}` }, queueReload)
-          .on("postgres_changes", { event: "*", schema: "public", table: "endurance_entries", filter: `event_id=eq.${eventId}` }, queueReload)
-          .on("postgres_changes", { event: "*", schema: "public", table: "battle_teams", filter: `event_id=eq.${eventId}` }, queueReload)
-          .on("postgres_changes", { event: "*", schema: "public", table: "battle_matches", filter: `event_id=eq.${eventId}` }, queueReload)
-          .on("broadcast", { event: "battle-tally" }, () => {
-            battleTalliedAt = new Date().toLocaleTimeString("zh-HK", { hour: "2-digit", minute: "2-digit", hour12: false });
-            queueReload();
-            toast("格鬥總分已結算");
-          })
-          .subscribe(status => {
-            if (status === "SUBSCRIBED") setConnection("online", "已即時連線");
-            if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") setConnection("offline", "連線中斷");
-          });
-      }
-
-      async function enterEvent(id) {
-        eventId = id;
-        localStorage.setItem("hagen-active-event", id);
-        await loadEventData();
-        subscribeToEvent();
-        $("#loginOverlay").classList.add("hidden");
+      async function loadEventData(silent = false) {
+        const seq = ++loadSeq;
+        if (!silent) setConnection("syncing", "同步中");
+        const data = await api("/api/state");
+        if (seq !== loadSeq) return data;
+        if (silent && data.version === lastVersion) {
+          setConnection("online", "已連線");
+          return data;
+        }
+        applySnapshot(data, { announceTally: Boolean(silent) });
+        return data;
       }
 
       async function submitEvent(mode) {
@@ -947,14 +985,15 @@
         const buttons = [$("#joinEventBtn"), $("#createEventBtn")];
         buttons.forEach(button => button.disabled = true);
         try {
-          await ensureAnonymousSession();
-          const rpc = mode === "create" ? "create_event" : "join_event";
-          const params = mode === "create"
-            ? { event_code: code, helper_password: password, event_name: "陀螺 Fun Day", school: "香港佛教劉金龍中學" }
-            : { event_code: code, helper_password: password };
-          const { data, error } = await db.rpc(rpc, params);
-          if (error) throw error;
-          await enterEvent(data);
+          const data = await api("/api/session", {
+            method: "POST",
+            body: mode === "create"
+              ? { mode, code, password, name: "陀螺 Fun Day", school: "香港佛教劉金龍中學" }
+              : { mode, code, password }
+          });
+          applySnapshot(data);
+          startPolling();
+          $("#loginOverlay").classList.add("hidden");
           toast(mode === "create" ? "活動已建立" : "已加入活動");
         } catch (error) {
           showLoginError(friendlyError(error));
@@ -964,24 +1003,15 @@
       }
 
       async function initialize() {
-        if (!CONFIG.url || !CONFIG.anonKey || CONFIG.url.includes("YOUR_PROJECT")) {
-          showLoginError("尚未設定 Supabase。請先複製 supabase-config.example.js 為 supabase-config.js 並填入項目資料。");
-          $$("#loginForm button").forEach(button => button.disabled = true);
-          return;
-        }
-        if (!window.supabase) return showLoginError("未能載入 Supabase 程式庫，請檢查網絡。");
-        db = window.supabase.createClient(CONFIG.url, CONFIG.anonKey);
         try {
-          await ensureAnonymousSession();
-          const savedEvent = localStorage.getItem("hagen-active-event");
-          if (savedEvent) {
-            try { await enterEvent(savedEvent); }
-            catch {
-              localStorage.removeItem("hagen-active-event");
-              $("#loginOverlay").classList.remove("hidden");
-            }
-          }
+          setConnection("syncing", "連線中");
+          const data = await api("/api/state");
+          applySnapshot(data);
+          startPolling();
+          $("#loginOverlay").classList.add("hidden");
         } catch (error) {
+          setConnection("offline", "未連線");
+          if (error.status === 401) return;
           showLoginError(friendlyError(error));
         }
       }
@@ -1171,14 +1201,8 @@
           if (!confirm(`確定清除「${state.teams[index]}」${categoryLabel(category)}的最佳紀錄？`)) return;
           try {
             pendingEndurance.delete(item.id);
-            const { error } = await db.from("endurance_entries").update({
-              elapsed_ms: 0, started_at: null, status: "idle", best_elapsed_ms: 0
-            }).eq("id", item.id);
-            if (error) throw error;
-            Object.assign(item, { elapsed: 0, bestElapsed: 0, running: false, startedAt: null, done: false });
-            renderTimers();
+            await mutate("/api/endurance", { action: "clear-best", entryId: item.id });
             toast("最佳紀錄已清除");
-            await loadEventData(true);
           } catch (error) {
             toast(friendlyError(error));
             await loadEventData(true);
@@ -1189,10 +1213,7 @@
         }
         renderTimers();
         try {
-          const rpc = action === "start" ? "start_endurance" : action === "finish" ? "finish_endurance" : "reset_endurance";
-          const { error } = await db.rpc(rpc, { entry_id: item.id });
-          if (error) throw error;
-          if (action !== "start") await loadEventData(true);
+          await mutate("/api/endurance", { action, entryId: item.id });
         } catch (error) {
           pendingEndurance.delete(item.id);
           toast(friendlyError(error));
@@ -1203,12 +1224,12 @@
       async function resetEnduranceCategory(category) {
         const label = categoryLabel(category);
         if (!confirm(`確定清除${label}全部耐力紀錄？另一場耐力賽的成績不會受影響。`)) return;
-        const { error } = await db.from("endurance_entries").update({
-          elapsed_ms: 0, started_at: null, status: "idle", best_elapsed_ms: 0
-        }).eq("event_id", eventId).eq("category", category);
-        if (error) return toast(friendlyError(error));
-        await loadEventData(true);
-        toast(`${label}已重設`);
+        try {
+          await mutate("/api/endurance", { action: "reset-category", category });
+          toast(`${label}已重設`);
+        } catch (error) {
+          toast(friendlyError(error));
+        }
       }
 
       const matchId = (category, round, match) => `${category}-r${round}-m${match}`;
@@ -1223,10 +1244,6 @@
         if (!parsed) return { aScore: 0, bScore: 0, complete: false };
         return battleState(parsed.category).matches[id] || { aScore: 0, bScore: 0, complete: false };
       };
-      const roundColumn = (category) => category === "electric"
-        ? { count: "electric_round_count", active: "electric_active_round" }
-        : { count: "manual_round_count", active: "manual_active_round" };
-
       function timerFor(id) {
         const data = matchData(id);
         const started = data.timerStartedAt ? Date.parse(data.timerStartedAt) : 0;
@@ -1272,28 +1289,12 @@
       }
 
       async function tallyBattleScores() {
-        if (!eventId || !db) {
+        if (!eventId) {
           toast("請先加入活動");
           return;
         }
         try {
-          await loadEventData(true);
-          const { error } = await db.from("events").update({ name: state.eventName })
-            .eq("id", eventId)
-            .eq("name", state.eventName);
-          if (error) throw error;
-          try {
-            await realtimeChannel?.send({
-              type: "broadcast",
-              event: "battle-tally",
-              payload: { at: new Date().toISOString() }
-            });
-          } catch (sendError) {
-            /* Match rows are already stored. The events touch reloads other Helpers. */
-          }
-          battleTalliedAt = new Date().toLocaleTimeString("zh-HK", { hour: "2-digit", minute: "2-digit", hour12: false });
-          renderBattle();
-          renderLeaderboard();
+          await mutate("/api/battle", { action: "tally" });
           toast(`格鬥總分已結算（${battleTalliedAt}）`);
         } catch (error) {
           toast(friendlyError(error));
@@ -1474,13 +1475,13 @@
         }
         renderBattle();
         try {
-          const { data: updatedRows, error } = await db.from("battle_matches").update({
-            a_score: data.aScore, b_score: data.bScore, complete: data.complete
-          }).eq("id", data.id).eq("updated_at", original.updatedAt).select("id");
-          if (error) throw error;
-          if (!updatedRows.length) throw new Error("另一位 Helper 剛剛更新了此場，已載入最新賽果");
-          if (data.complete && data.timerRunning) await db.rpc("pause_battle_timer", { match_id: data.id });
-          await loadEventData(true);
+          await mutate("/api/battle", {
+            action: "score",
+            matchId: data.id,
+            aScore: data.aScore,
+            bScore: data.bScore,
+            updatedAtToken: original.updatedAt
+          });
         } catch (error) {
           toast(friendlyError(error));
           await loadEventData(true);
@@ -1491,46 +1492,42 @@
         const data = matchData(id);
         if (action === "reset") {
           if (data.complete && !confirm("確定清除這場賽果？")) return;
-          const { error } = await db.from("battle_matches").update({
-            a_score: 0, b_score: 0, complete: false,
-            timer_elapsed_ms: 0, timer_started_at: null, timer_running: false
-          }).eq("id", data.id);
-          if (error) return toast(friendlyError(error));
-          await loadEventData(true);
+          try {
+            await mutate("/api/battle", { action: "reset-match", matchId: data.id });
+          } catch (error) {
+            toast(friendlyError(error));
+          }
           return;
         }
-        const rpc = action === "pause" ? "pause_battle_timer" : "start_battle_timer";
-        const { error } = await db.rpc(rpc, { match_id: data.id });
-        if (error) return toast(friendlyError(error));
-        await loadEventData(true);
+        try {
+          await mutate("/api/battle", {
+            action: action === "pause" ? "pause-timer" : "start-timer",
+            matchId: data.id
+          });
+        } catch (error) {
+          toast(friendlyError(error));
+        }
       }
 
       async function changeRoundCount(category, delta) {
         const requested = battleState(category).roundCount + delta;
-        const { error } = await db.rpc("regenerate_battle_schedule", {
-          target_event_id: eventId,
-          requested_rounds: requested,
-          target_category: category
-        });
-        if (error) return toast(friendlyError(error));
-        await loadEventData(true);
-        toast(`${categoryLabel(category)}賽程已調整為 ${battleState(category).roundCount} 輪`);
+        try {
+          await mutate("/api/battle", { action: "rounds", category, rounds: requested });
+          toast(`${categoryLabel(category)}賽程已調整為 ${battleState(category).roundCount} 輪`);
+        } catch (error) {
+          toast(friendlyError(error));
+        }
       }
 
       async function resetBattleCategory(category) {
         const label = categoryLabel(category);
         if (!confirm(`確定清除${label}全部格鬥賽賽果？另一場格鬥賽不會受影響。`)) return;
-        const cols = roundColumn(category);
-        const [matchesResult, eventResult] = await Promise.all([
-          db.from("battle_matches").update({
-            a_score: 0, b_score: 0, complete: false,
-            timer_elapsed_ms: 0, timer_started_at: null, timer_running: false
-          }).eq("event_id", eventId).eq("category", category),
-          db.from("events").update({ [cols.active]: 0 }).eq("id", eventId)
-        ]);
-        if (matchesResult.error || eventResult.error) return toast(friendlyError(matchesResult.error || eventResult.error));
-        await loadEventData(true);
-        toast(`${label}格鬥賽已重設`);
+        try {
+          await mutate("/api/battle", { action: "reset-category", category });
+          toast(`${label}格鬥賽已重設`);
+        } catch (error) {
+          toast(friendlyError(error));
+        }
       }
 
       function renderSettings() {
@@ -1547,25 +1544,26 @@
       }
 
       async function addBattleTeam() {
-        const { error } = await db.rpc("add_battle_team", {
-          target_event_id: eventId,
-          team_name: null
-        });
-        if (error) return toast(friendlyError(error));
-        await loadEventData(true);
-        switchView("settings");
-        const input = document.querySelector(`[data-team-input="${state.teams.length - 1}"]`);
-        input?.focus();
-        input?.select();
+        try {
+          await mutate("/api/teams", { action: "add" });
+          switchView("settings");
+          const input = document.querySelector(`[data-team-input="${state.teams.length - 1}"]`);
+          input?.focus();
+          input?.select();
+        } catch (error) {
+          toast(friendlyError(error));
+        }
       }
 
       async function deleteBattleTeam(index) {
         const row = teamRows[index];
         if (!row || !confirm(`確定刪除「${state.teams[index]}」？其耐力紀錄亦會刪除，格鬥賽程會自動重排。`)) return;
-        const { error } = await db.rpc("delete_battle_team", { target_team_id: row.id });
-        if (error) return toast(friendlyError(error));
-        await loadEventData(true);
-        toast("組別已從所有比賽刪除");
+        try {
+          await mutate("/api/teams", { action: "delete", teamId: row.id });
+          toast("組別已從所有比賽刪除");
+        } catch (error) {
+          toast(friendlyError(error));
+        }
       }
 
       function switchView(view) {
@@ -1676,9 +1674,8 @@
           const battle = battleState(category);
           battle.activeRound = Number(roundButton.dataset.round);
           renderBattle();
-          const cols = roundColumn(category);
-          db.from("events").update({ [cols.active]: battle.activeRound }).eq("id", eventId)
-            .then(({ error }) => { if (error) toast(friendlyError(error)); });
+          mutate("/api/battle", { action: "active-round", category, round: battle.activeRound })
+            .catch(error => toast(friendlyError(error)));
         }
 
         const scoreButton = event.target.closest("[data-score]");
@@ -1697,43 +1694,28 @@
         });
         renderHeader();
         renderBattle();
-        const requests = [
-          db.from("events").update({ name: state.eventName, school_name: state.schoolName }).eq("id", eventId),
-          ...teamRows.map((row, i) => db.from("battle_teams").update({ name: state.teams[i] }).eq("id", row.id))
-        ];
-        const results = await Promise.all(requests);
-        const error = results.find(result => result.error)?.error;
-        if (error) return toast(friendlyError(error));
-        await loadEventData(true);
-        toast("設定已即時同步");
+        try {
+          await mutate("/api/settings", {
+            name: state.eventName,
+            school: state.schoolName,
+            teams: teamRows.map((row, i) => ({ id: row.id, name: state.teams[i] }))
+          });
+          toast("設定已即時同步");
+        } catch (error) {
+          toast(friendlyError(error));
+        }
       });
 
       $("#addBattleTeamBtn").addEventListener("click", addBattleTeam);
 
       $("#resetAllBtn").addEventListener("click", async () => {
         if (!confirm("確定清除所有計時、賽果及隊名？此動作不能復原。")) return;
-        const requests = [
-          ...Object.values(state.endurance).flatMap(entries => entries.map((item, i) =>
-            db.from("endurance_entries").update({
-              name: `第 ${i + 1} 組`, elapsed_ms: 0, started_at: null, status: "idle", best_elapsed_ms: 0
-            }).eq("id", item.id)
-          )),
-          ...teamRows.map((row, i) => db.from("battle_teams").update({ name: `第 ${i + 1} 組` }).eq("id", row.id)),
-          db.from("battle_matches").update({
-            a_score: 0, b_score: 0, complete: false,
-            timer_elapsed_ms: 0, timer_started_at: null, timer_running: false
-          }).eq("event_id", eventId),
-          db.from("events").update({
-            active_round: 0,
-            electric_active_round: 0,
-            manual_active_round: 0
-          }).eq("id", eventId)
-        ];
-        const results = await Promise.all(requests);
-        const error = results.find(result => result.error)?.error;
-        if (error) return toast(friendlyError(error));
-        await loadEventData(true);
-        toast("全部資料已清除");
+        try {
+          await mutate("/api/reset", {});
+          toast("全部資料已清除");
+        } catch (error) {
+          toast(friendlyError(error));
+        }
       });
 
       $("#exportBtn").addEventListener("click", exportData);
@@ -1748,14 +1730,18 @@
       });
       $("#createEventBtn").addEventListener("click", () => submitEvent("create"));
       $("#logoutBtn").addEventListener("click", async () => {
-        if (realtimeChannel) await db.removeChannel(realtimeChannel);
-        await db.auth.signOut();
-        localStorage.removeItem("hagen-active-event");
+        stopPolling();
+        loadSeq += 1;
+        try { await api("/api/logout", { method: "POST", body: {} }); } catch {}
         eventId = null;
+        lastVersion = "";
+        seenTally = null;
+        pendingEndurance.clear();
         state = defaultState();
+        teamRows = [];
         $("#helperPassword").value = "";
         $("#loginOverlay").classList.remove("hidden");
-        await ensureAnonymousSession();
+        setConnection("offline", "未連線");
       });
 
       setInterval(() => {
@@ -1783,8 +1769,9 @@
               data.timeAlerted = true;
               toast(`${categoryLabel(id)}時間到！`);
               if ("vibrate" in navigator) navigator.vibrate([200, 100, 200]);
-              db.rpc("pause_battle_timer", { match_id: data.id }).then(({ error }) => {
-                if (error) toast(friendlyError(error));
+              mutate("/api/battle", { action: "pause-timer", matchId: data.id }).catch(error => {
+                data.timeAlerted = false;
+                toast(friendlyError(error));
               });
             }
           });
@@ -1792,10 +1779,15 @@
       }, 50);
 
       window.addEventListener("online", () => {
+        if (!eventId || inflight) return;
         setConnection("syncing", "重新連線");
         loadEventData(true).catch(() => setConnection("offline", "連線中斷"));
       });
       window.addEventListener("offline", () => setConnection("offline", "離線"));
+      window.addEventListener("focus", () => {
+        if (!eventId || inflight) return;
+        loadEventData(true).catch(() => {});
+      });
 
       initialize();
     })();
