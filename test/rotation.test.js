@@ -29,6 +29,32 @@ test("each side is tables 1-6, never a shared 1-12", () => {
   assert.ok(manual.rows.every((row) => row.table <= 6));
 });
 
+test("scan order keeps one table's pairings together, electric then manual", () => {
+  const { scanRows } = require("../lib/rotation");
+  const rows = scanRows([
+    {
+      side: "electric",
+      label: "電動組",
+      rows: [
+        { table: 2, teamAIndex: 1, teamBIndex: 2, round: 1 },
+        { table: 1, teamAIndex: 0, teamBIndex: 3, round: 2 },
+        { table: 1, teamAIndex: 4, teamBIndex: 5, round: 1 }
+      ]
+    },
+    {
+      side: "manual",
+      label: "手動組",
+      rows: [{ table: 1, teamAIndex: 6, teamBIndex: 7, round: 1 }]
+    }
+  ]);
+  assert.deepEqual(rows.map((row) => [row.side, row.table, row.round, row.teamAIndex, row.teamBIndex]), [
+    ["electric", 1, 1, 4, 5],
+    ["electric", 1, 2, 0, 3],
+    ["electric", 2, 1, 1, 2],
+    ["manual", 1, 1, 6, 7]
+  ]);
+});
+
 test("rotation keeps match numbers as table numbers even if listed out of order", () => {
   const sheet = rotationSheet([
     { matches: [{ a: 3, b: 1, n: 2 }, { a: 0, b: 2, n: 0 }], bye: -1 }

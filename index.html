@@ -373,10 +373,8 @@
     .roster-sheet table { background: white; }
     .roster-sheet th, .roster-sheet td { border: 1px solid #d5dfd9; }
     .roster-sheet .table-no { font-weight: 900; font-variant-numeric: tabular-nums; width: 4.5rem; }
-    .rotation-stack { display: grid; gap: 22px; }
-    .rotation-round { margin-top: 12px; }
-    .rotation-round h3 { font-size: 16px; margin: 0 0 6px; }
     .rotation-sheet tbody tr:nth-child(-n+3) { background: transparent; }
+    .rotation-sheet tr.table-start td { border-top: 2px solid #9eb5ab; }
 
     .settings-grid {
       display: grid;
@@ -624,7 +622,7 @@
       <div class="section-head no-print">
         <div>
           <h2>對陣輪轉</h2>
-          <p class="hint">格鬥賽每輪一張表：桌號、A組、B組、輪次。現場共 12 桌：手動組桌號 1–6、電動組桌號 1–6。兩邊各自從 1 起計，不是共用 1–12。</p>
+          <p class="hint">一張表對照每桌對陣：桌號、A組、B組、輪次。同一桌的各輪排在一起。手動組與電動組各自使用桌號 1–6。</p>
         </div>
         <button class="btn small primary" type="button" id="printRotationBtn">列印輪轉表</button>
       </div>
@@ -1640,46 +1638,45 @@
       function renderRotation() {
         const root = $("#rotationPrint");
         if (!root) return;
-        const blocks = CATEGORIES.map(cat => {
+        const sheets = CATEGORIES.map(cat => {
           const sheet = FunDayRotation.rotationSheet(battleState(cat.id).schedule);
-          if (!sheet.rows.length) {
-            return `<section class="roster-block"><h2>${cat.label}</h2><p class="hint">尚未建立賽程</p></section>`;
-          }
-          const byeByRound = new Map(sheet.byes.map(bye => [bye.round, bye.teamIndex]));
-          const rounds = [...new Set(sheet.rows.map(row => row.round))];
-          const body = rounds.map(round => {
-            const matches = sheet.rows.filter(row => row.round === round);
-            const byeIndex = byeByRound.get(round);
-            const bye = byeIndex == null ? "" : `<p class="hint">輪空：${escapeHtml(teamLabel(byeIndex))}</p>`;
-            return `
-              <div class="rotation-round">
-                <h3>第 ${round} 輪</h3>
-                <table>
-                  <thead><tr><th>桌號</th><th>A組</th><th>B組</th><th>輪次</th></tr></thead>
-                  <tbody>
-                    ${matches.map(row => `
-                      <tr>
-                        <td class="table-no">${row.table}</td>
-                        <td><strong>${escapeHtml(teamLabel(row.teamAIndex))}</strong></td>
-                        <td><strong>${escapeHtml(teamLabel(row.teamBIndex))}</strong></td>
-                        <td>${row.round}</td>
-                      </tr>`).join("")}
-                  </tbody>
-                </table>
-                ${bye}
-              </div>`;
-          }).join("");
-          const overflowNote = sheet.overflow.length
-            ? `<p class="hint">有 ${sheet.overflow.length} 場超出此邊 6 桌，沒有編成桌號 7 或以後。</p>`
-            : "";
-          return `<section class="roster-block"><h2>${cat.label} · 桌號 1–6</h2><p class="hint">此邊桌號 1–6，不順延到另一邊</p>${body}${overflowNote}</section>`;
-        }).join("");
+          return { cat, sheet };
+        });
+        const rows = FunDayRotation.scanRows(sheets.map(({ cat, sheet }) => ({
+          side: cat.id,
+          label: cat.label,
+          rows: sheet.rows
+        })));
+        const byes = sheets.flatMap(({ cat, sheet }) => sheet.byes.map(bye => `${cat.label}第 ${bye.round} 輪 ${teamLabel(bye.teamIndex)}`));
+        const overflow = sheets.reduce((sum, { sheet }) => sum + sheet.overflow.length, 0);
+        const notes = [
+          byes.length ? `輪空：${byes.join("、")}。` : "",
+          overflow ? `有 ${overflow} 場超出該邊 6 桌，沒有編成桌號 7 或以後。` : ""
+        ].filter(Boolean).join(" ");
+        const body = rows.length
+          ? rows.map((row, index) => {
+              const previous = rows[index - 1];
+              const start = !previous || previous.side !== row.side || previous.table !== row.table;
+              return `
+                <tr class="${start ? "table-start" : ""}">
+                  <td class="table-no">${row.table}</td>
+                  <td><strong>${escapeHtml(teamLabel(row.teamAIndex))}</strong></td>
+                  <td><strong>${escapeHtml(teamLabel(row.teamBIndex))}</strong></td>
+                  <td>${row.round}</td>
+                  <td>${escapeHtml(row.sideLabel)}</td>
+                </tr>`;
+            }).join("")
+          : `<tr><td colspan="5">尚未建立賽程</td></tr>`;
         root.innerHTML = `
           <div class="roster-head">
             <h2 class="roster-event">${escapeHtml(state.eventName || "陀螺 Fun Day")}</h2>
-            <p class="hint">${escapeHtml(state.schoolName || "")} · 對陣輪轉。手動組桌號 1–6、電動組桌號 1–6，不是共用 1–12。</p>
+            <p class="hint">${escapeHtml(state.schoolName || "")} · 每桌對陣。手動組與電動組各自桌號 1–6，同一桌的各輪排在一起。</p>
           </div>
-          <div class="rotation-stack">${blocks}</div>`;
+          <table>
+            <thead><tr><th>桌號</th><th>A組</th><th>B組</th><th>輪次</th><th>邊</th></tr></thead>
+            <tbody>${body}</tbody>
+          </table>
+          ${notes ? `<p class="hint">${notes}</p>` : ""}`;
       }
 
       function renderRoster() {
