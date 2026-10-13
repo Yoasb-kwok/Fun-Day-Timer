@@ -1647,7 +1647,7 @@
           label: cat.label,
           rows: sheet.rows
         })));
-        const byes = sheets.flatMap(({ cat, sheet }) => sheet.byes.map(bye => `${cat.label}第 ${bye.round} 輪 ${teamLabel(bye.teamIndex)}`));
+        const byes = sheets.flatMap(({ cat, sheet }) => sheet.byes.map(bye => `${cat.label}第 ${bye.round} 輪 ${escapeHtml(teamLabel(bye.teamIndex))}`));
         const overflow = sheets.reduce((sum, { sheet }) => sum + sheet.overflow.length, 0);
         const notes = [
           byes.length ? `輪空：${byes.join("、")}。` : "",
